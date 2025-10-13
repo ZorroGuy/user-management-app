@@ -1,0 +1,55 @@
+.homepage-container {
+  padding: 30px;
+  max-width: 1200px;
+  margin: 0 auto;
+  font-family: "Arial", sans-serif;
+}
+
+.homepage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 25px;
+}
+
+.homepage-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #333;
+}
+
+.btn-add-user {
+  padding: 10px 20px;
+  background-color: #3b82f6;
+  color: white;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.btn-add-user:hover {
+  background-color: #2563eb;
+}
+
+.table-container {
+  background-color: #fff;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  overflow-x: auto; /* enables horizontal scroll on mobile */
+}
+
+/* Optional: make h1, modal and buttons responsive */
+@media (max-width: 768px) {
+  .homepage-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+
+  .btn-add-user {
+    width: 100%;
+  }
+}
