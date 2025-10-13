@@ -1,11 +1,9 @@
-/* Table container with horizontal scroll */
 .overflow-x-auto {
   width: 100%;
   overflow-x: auto;
   margin-top: 20px;
 }
 
-/* Table style */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -45,7 +43,6 @@ tbody tr.bg-gray-50 div {
   line-height: 1.5;
 }
 
-/* Buttons style */
 button {
   background: none;
   border: none;
@@ -60,7 +57,7 @@ button:hover svg {
 }
 
 a {
-  color: #2563eb; /* blue-600 */
+  color: #2563eb;
   text-decoration: underline;
 }
 
@@ -68,9 +65,8 @@ a:hover {
   opacity: 0.8;
 }
 
-/* Responsive fix: keep table scrollable */
 @media screen and (max-width: 768px) {
   table {
-    min-width: 700px; /* ensures horizontal scroll appears */
+    min-width: 700px;
   }
 }
