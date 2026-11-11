@@ -1,0 +1,1585 @@
+string standalone.Score_card_test_fn(Int id,String module)
+{
+try 
+{
+	if(module.equalsIgnoreCase("Inprinciple"))
+	{
+		in_principle = zoho.crm.getRecordById("In_principle",id);
+		// 		info in_principle;
+		loan_id = in_principle.get("Loan_Application").get("id");
+	}
+	else if(module.equalsIgnoreCase("Recommendation"))
+	{
+		overall = zoho.crm.getRecordById("Overall_Eligibility",id);
+		// 		info overall;
+		loan_id = overall.get("Loan_Application").get("id");
+	}
+	//CTLZ-67402 - BL/PR Scorecard Start Below
+	else if(module.equalsIgnoreCase("Bank_details") || module.equalsIgnoreCase("Bank_details_Create"))
+	{
+		loan_id = id;
+	}
+	loan = zoho.crm.getRecordById("Accounts",loan_id);
+	// 	info loan;
+	loan_type = loan.get("Loan_Product_Type");
+	// 	info loan_type;
+	loan_app_no = loan.get("Loan_Application_No");
+	// 	info loan_app_no;
+	constitution_type = loan.get("Constitution_Type");
+	// 	info constitution_type;
+	app_stage = loan.get("Application_Stage");
+	// 	info app_stage;
+	applicants = zoho.crm.getRelatedRecords("Contacts","Accounts",loan_id,1,200,{"sort_by":"Created_Time","sort_order":"asc"});
+	// 	info applicants;
+	header_data = Map();
+	header_data.put("X-SERVICE-NAME","ZohoCRM");
+	header_data.put("X-SERVICE-ORG","60023672997");
+	// 	info header_data;
+	// 	info applicants;
+	app_no = loan.get("Loan_Application_No");
+	complete_map = Map();
+	details = List();
+	complete_map.put("leadID",loan.get("Loan_Application_No"));
+	complete_map.put("region",loan.get("Region"));
+	complete_map.put("area",loan.get("Area"));
+	complete_map.put("pincode",loan.get("Pincode_Value"));
+	if(loan_type.equalsIgnoreCase("Business Loan"))
+	{
+		complete_map.put("productCode","BL");
+	}
+	else if(loan_type == "Personal Loan")
+	{
+		complete_map.put("productCode","PL");
+	}
+	else
+	{
+		complete_map.put("productCode","PR");
+	}
+	// 	info "complete_map:" + complete_map;
+	additionalCibilAllowed = true;
+	for each  app in applicants
+	{
+		case_map = Map();
+		// Create a new map for each applicant/co-applicant
+		cibil_list = List();
+		additional_cibil_list = List();
+		cibil_map = Map();
+		// 		info app;
+		// 		Sivaranjani added for Banking
+		bank_list = List();
+		bankmap = Map();
+		merged_bank_details = List();
+		if(app.get("Applicants_Type").equalsIgnoreCase("Applicant"))
+		{
+			case_map.put("applicantType",app.get("Applicants_Type"));
+			if(!isNull(app.get("Entity_Industry_Type")))
+			{
+				case_map.put("industryType",app.get("Entity_Industry_Type").get("name"));
+			}
+			else
+			{
+				if(!isNull(app.get("Industry_Type")))
+				{
+					case_map.put("industryType",app.get("Industry_Type"));
+				}
+			}
+			// 			Sivaranjani commented the below mentioned lines
+			// 			info "business Vintage substring" + app.get("Business_Vintage").subString(0,1);
+			// 			case_map.put("businessVintage",app.get("Business_Vintage").subString(0,1));
+			// 			Sivaranjani added for the Business Vintage
+			// 			info app.get("Business_Vintage1");
+			vintage_str = app.get("Business_Vintage1");
+			// 			info vintage_str;
+			years = 0;
+			months = 0;
+			if(vintage_str != null && vintage_str != "")
+			{
+				parts = vintage_str.toList(" ");
+				// 				info parts;
+				for each  index in parts
+				{
+					info index;
+					if(index.toLowerCase() == "years" || index.toLowerCase() == "year")
+					{
+						years = ifnull(parts.get(parts.indexOf(index) - 1).toDecimal(),0);
+						// 						info years;
+					}
+					if(index.toLowerCase() == "months" || index.toLowerCase() == "month")
+					{
+						months = ifnull(parts.get(parts.indexOf(index) - 1).toDecimal(),0);
+						// 						info months;
+					}
+				}
+			}
+			business_vintage_decimal = years + months / 12;
+			// 			info business_vintage_decimal;
+			business_vintage_decimal = business_vintage_decimal.round(2);
+			// 			info business_vintage_decimal;
+			case_map.put("businessVintage",business_vintage_decimal);
+			// 			Sivaranjani ended
+			if(!isNull(app.get("Nature_of_Business")))
+			{
+				case_map.put("natureOfBusiness",app.get("Nature_of_Business"));
+			}
+			else
+			{
+				if(!isNull(app.get("Entity_Nature_of_Business")))
+				{
+					case_map.put("natureOfBusiness",app.get("Entity_Nature_of_Business"));
+				}
+			}
+			// 			case_map.put("natureOfBusiness",app.get("Entity_Nature_of_Business"));
+			case_map.put("businessPincode",app.get("BA_Pincode").get("name"));
+			case_map.put("panNo",app.get("Applicant_PAN_No"));
+			// 			info app;
+			// 			info "test" + app.get("Industry_Type");
+			// 			Sivaranjani added for bank
+			product_program = app.get("Product_Program");
+			// 			info product_program;
+			// M Izzath Suhail for adding abb for applicant and coapp start 4
+			average_bal = 0;
+			// M Izzath Suhail for adding abb for applicant and coapp start 4
+			//CTLZ-67402 - BL Sole Prop bank data check Start
+			bl_sole_bank_check = module.equalsIgnoreCase("Bank_details") && loan_type.equalsIgnoreCase("Business Loan") && ifnull(app.get("Constitution_Type1"),"").equalsIgnoreCase("Sole Proprietor");
+			bank_missing_resp = {"status":"Failed","error_code":"BANK_DATA_MISSING","message":"Banking data (account analysis) is not available for the applicant. Please complete the bank details and try again."};
+			//CTLZ-67402 - BL Sole Prop bank data check End
+			if(loan.get("Source_Type") == "DST" && app.get("Product_Program") == "Others" || loan.get("Source_Type") == "DSA")
+			{
+				bank = zoho.crm.getRelatedRecords("Related_List_Name_3","Contacts",app.get("id"));
+				//CTLZ-67402 - BL Sole Prop: no bank record at all
+				if(bl_sole_bank_check && (isNull(bank) || bank.size() == 0))
+				{
+					info "BL Sole Prop - no bank record";
+					return bank_missing_resp;
+				}
+				// M Izzath Suhail for adding abb for applicant and coapp start 3
+				// 				info bank;
+				// 				info bank.get(0).get("Average_Balance");
+				average_bal = bank.get(0).get("Average_Balance").toNumber();
+				// M Izzath Suhail for adding abb for applicant and coapp start 3
+				// 				info bank.size();
+				if(bank.size() > 0)
+				{
+					// 					info bank;
+					for each  b in bank
+					{
+						bank_record = zoho.crm.getRecordById("Bank_Details",b.get("id"));
+						// 						info bank_record;
+						if(bank_record.get("Additional_banks_details").size() > 0)
+						{
+							basic_details_list = bank_record.get("Basic_details");
+							// 							info basic_details_list;
+							add_bank_list = bank_record.get("Additional_banks_details");
+							// 							info add_bank_list;
+							for each  basic_details in basic_details_list
+							{
+								merged_bank_details = List();
+								basic_transaction_id = basic_details.get("Transaction_ID");
+								// 								info add_bank_list;
+								for each  add_bank in add_bank_list
+								{
+									transaction_id = add_bank.get("Transaction_ID");
+									if(module.equalsIgnoreCase("Recommendation") || module.equalsIgnoreCase("Parallel"))
+									{
+										info "Entering into the Recommendation";
+										if(basic_details.get("Cnsdr_for_Othr_Bnkng_Prtnr") && !isNull(basic_details.get("Statement_Type")))
+										{
+											info "Not Available";
+											if(transaction_id == basic_transaction_id)
+											{
+												ac_no = basic_details.get("A_C_No");
+												acc_analysis = add_bank.get("Account_Analysis");
+												if(!isNull(acc_analysis))
+												{
+													file_id = acc_analysis.get(0).get("file_Id");
+													file_data = invokeurl
+													[
+														url :"https://www.zohoapis.in/crm/v8/files?id=" + file_id
+														type :GET
+														connection:"zohocrmall"
+													];
+													bank = file_data.getFileContent();
+													bank_map = bank.toMap();
+													pir_data = bank_map.get("PIR:Data");
+													target_acc_no = 50100298941831;
+													acc_analysis_list = pir_data.get("AccountAnalysis");
+													// 													info acc_analysis_list;
+													acc_xns = pir_data.get("Xns");
+													matched_account = Map();
+													// Loop through each AccountAnalysis object
+													for each  account_item in acc_analysis_list
+													{
+														acc_info = account_item.get("$");
+														if(!isNull(acc_info))
+														{
+															acc_no = acc_info.get("accountNo");
+															if(acc_no == ac_no)
+															{
+																for each  xns_data in acc_xns
+																{
+																	if(xns_data.get("$").get("accountNo") == acc_no)
+																	{
+																		matched_account = account_item;
+																		matched_account.put("Xns",xns_data.toList());
+																		break;
+																	}
+																}
+															}
+														}
+													}
+													merged_bank_details.add(matched_account);
+												}
+											}
+										}
+										else if(basic_details.get("Cnsdr_for_Othr_Bnkng_Prtnr") && isNull(basic_details.get("Statement_Type")))
+										{
+											info "Scanned Api";
+											acc_analysis = basic_details.get("Scanned_Account_Analysis");
+											// 											info acc_analysis;
+											if(!isNull(acc_analysis))
+											{
+												ac_no = basic_details.get("A_C_No");
+												file_id = acc_analysis.get(0).get("file_Id");
+												file_data = invokeurl
+												[
+													url :"https://www.zohoapis.in/crm/v8/files?id=" + file_id
+													type :GET
+													connection:"zohocrmall"
+												];
+												bank = file_data.getFileContent();
+												bank_map = bank.toMap();
+												pir_data = bank_map.get("PIR:Data");
+												acc_analysis_list = pir_data.get("AccountAnalysis");
+												matched_account = Map();
+												for each  account_item in acc_analysis_list
+												{
+													acc_info = account_item.get("$");
+													// 														info acc_info;
+													if(!isNull(acc_info))
+													{
+														acc_no = acc_info.get("accountNo");
+														if(acc_no == ac_no)
+														{
+															for each  xns_data in acc_xns
+															{
+																if(xns_data.get("$").get("accountNo") == acc_no)
+																{
+																	matched_account = account_item;
+																	matched_account.put("Xns",xns_data.toList());
+																	break;
+																}
+															}
+														}
+													}
+												}
+												// 												info matched_account;
+												merged_bank_details.add(matched_account);
+												// 												info merged_bank_details;
+											}
+										}
+										// Ended
+									}
+									else
+									{
+										info "Applicant";
+										if(transaction_id == basic_transaction_id)
+										{
+											acc_analysis = add_bank.get("Account_Analysis");
+											if(!isNull(acc_analysis))
+											{
+												file_id = acc_analysis.get(0).get("file_Id");
+												file_data = invokeurl
+												[
+													url :"https://www.zohoapis.in/crm/v8/files?id=" + file_id
+													type :GET
+													connection:"zohocrmall"
+												];
+												bank = file_data.getFileContent();
+												bank_map = bank.toMap();
+												// 												info bank_map;
+												pir_data = bank_map.get("PIR:Data");
+												acc_analysis_list = pir_data.get("AccountAnalysis");
+												acc_xns = pir_data.get("Xns");
+												// 												info acc_analysis_list;
+												for each  acc in acc_analysis_list
+												{
+													for each  xns_data in acc_xns
+													{
+														if(xns_data.get("$").get("accountNo") == acc.get("$").get("accountNo"))
+														{
+															acc.put("Xns",xns_data.toList());
+															merged_bank_details.add(acc);
+															break;
+														}
+													}
+												}
+											}
+										}
+									}
+								}
+								// end inner loop
+								// 								info merged_bank_details;
+								if(merged_bank_details.size() > 0)
+								{
+									for each  acc_item in merged_bank_details
+									{
+										// 										info acc_item;
+										bank_list.add(acc_item);
+									}
+								}
+							}
+							unique_bank_list = List();
+							processed_account_nos = List();
+							for each  bank in bank_list
+							{
+								account_no = bank.get("$").get("accountNo");
+								if(!processed_account_nos.contains(account_no))
+								{
+									unique_bank_list.add(bank);
+									processed_account_nos.add(account_no);
+								}
+							}
+							bank_list = unique_bank_list;
+							// 							info bank_list;
+							if(bank_list.size() > 0)
+							{
+								bankmap.put("bankdetails",bank_list);
+								case_map.put("bankData",bankmap);
+								// 								case_map.put("bankData",null);
+							}
+							// 							info case_map;
+						}
+					}
+				}
+				else
+				{
+					if(module == "Bank_details")
+					{
+						return "";
+					}
+				}
+				//CTLZ-67402 - BL Sole Prop: bank record exists but no usable bank data
+				if(bl_sole_bank_check && !case_map.containKey("bankData"))
+				{
+					info "BL Sole Prop - bankData not built";
+					return bank_missing_resp;
+				}
+			}
+			else
+			{
+				if(!isNull(product_program))
+				{
+					// 					info "Product program not null";
+					if(product_program == "Pre-Approved Incremental Loan2" || product_program == "VF Repayment Surrogate" || product_program == "Bureau RTR Surrogate")
+					{
+						// 						info "Product Program" + product_program;
+						case_map.put("bankData",null);
+					}
+				}
+			}
+			// 			Ended
+			// M Izzath Suhail for adding abb for applicant and coapp start 1
+			// 			info case_map;
+			// 			info in_principle;
+			if(module.equalsIgnoreCase("Inprinciple"))
+			{
+				// 				case_map.put("abb",in_principle.get("Primary_Applicant_ABB"));
+				case_map.put("abb",average_bal);
+			}
+			else if(module.equalsIgnoreCase("Recommendation"))
+			{
+				case_map.put("abb",overall.get("Primary_Applicant_s_Monthly_ABB"));
+			}
+			// M Izzath Suhail for adding abb for applicant and coapp end 1
+			if(app.get("Constitution_Type1").equalsIgnoreCase("Sole Proprietor"))
+			{
+				app_id = app.get("Applicant_PAN_No");
+				// 		info app_id;
+				query = "select Response,id from Logger where ((API='CIBIL' and API_Call_Status='Success') and Applicant_PAN='" + app_id + "') order by Created_Time desc limit 0,1";
+				// 		info query;
+				queryMap = Map();
+				queryMap.put("select_query",query);
+				resp = invokeurl
+				[
+					url :"https://www.zohoapis.in/crm/v8/coql"
+					type :POST
+					parameters:queryMap.toString()
+					connection:"zohocrmall"
+				];
+				// 	info resp;
+				logger_id = resp.get("data").get(0).get("id");
+				// 	info logger_id;
+				logger_value = zoho.crm.getRecordById("Logger",logger_id);
+				// 	info logger_value;
+				file_data = invokeurl
+				[
+					url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+					type :GET
+					connection:"zohocrmall"
+				];
+				// 				info file_data;
+				cibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+				// 				info cibil;
+				cibil_data = cibil.get("data").get("cibilJson");
+				// 			info cibil_data;
+				additional_cibil = cibil.get("data").get("AdditionalCibilJson");
+				// 			info additional_cibil;
+				cibil_data1 = cibil_data.get(0);
+				// 			info cibil_data1;
+				cibil_list.add(cibil_data1);
+				cibil_map.put("cibilJson",cibil_list);
+				// 				info cibil_map;
+				// 				Additional Cibil Code
+				if(app_stage.equalsIgnoreCase("Credit Journey"))
+				{
+					info "Credit Journey";
+					query = "select Response,id from Logger where (((Name  = 'ADDITIONAL_CIBIL_API' and API_Call_Status='Success') and Application_Number='" + app_no + "') and Primary_PAN='" + app_id + "') order by Created_Time desc limit 0,1";
+					info query;
+					queryMap = Map();
+					queryMap.put("select_query",query);
+					resp = invokeurl
+					[
+						url :"https://www.zohoapis.in/crm/v8/coql"
+						type :POST
+						parameters:queryMap.toString()
+						connection:"zohocrmall"
+					];
+					info resp;
+					info resp.size();
+					if(!isNull(resp))
+					{
+						logger_id = resp.get("data").get(0).get("id");
+						// 	info logger_id;
+						logger_value = zoho.crm.getRecordById("Logger",logger_id);
+						// 	info logger_value;
+						file_data = invokeurl
+						[
+							url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+							type :GET
+							connection:"zohocrmall"
+						];
+						additionalcibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+						// 						info additionalcibil;
+						add_cibil_data = additionalcibil.get("data").get("cibilJson");
+						// 						info add_cibil_data;
+						add_cibil_data1 = add_cibil_data.get(0);
+						// 			info cibil_data1;
+						additional_cibil_list.add(add_cibil_data1);
+						cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+					}
+				}
+				info "Testing";
+				// 				info cibil_map;
+				if(cibil_map.size() > 0)
+				{
+					// 				cibil_list.add(cibil_map);
+					case_map.put("bureauData",cibil_map);
+				}
+				//CTLZ-67402 - BL/PR Scorecard Start1
+				loan_application_scorecard_flag = ifNull(loan.get("ScoreCard_Flag"),"");
+				// 				if(loan_application_scorecard_flag)
+				// 				{
+				// 					geo_res = standalone.CSEL_GeoIQ_API_BL(app.get("id"));
+				// 					info geo_res;
+				// 					Geo_list_data = geo_res.toMap();
+				// 					info Geo_list_data;
+				// 					model_score = Geo_list_data.get("data").get("model_score");
+				// 					info model_score;
+				// 					geoIQItem = Map();
+				// 					geoIQData = Map();
+				// 					geoIQList = List();
+				// 					geoIQData.put("model_score",model_score);
+				// 					geoIQItem.put("data",geoIQData);
+				// 					geoIQItem.put("status",200);
+				// 					geoIQList.add(geoIQItem);
+				// 					geoIQPayload = Map();
+				// 					geoIQPayload.put("geoIQ",geoIQList);
+				// 					case_map.put("geoIQData",geoIQPayload);
+				// 					info case_map;
+				// 					// 			return "";
+				// 				}
+				geoIQPayload = Map();
+				case_map.put("geoIQData",geoIQPayload);
+				//CTLZ-67402 - BL/PR Scorecard End 1
+				// 				info case_map;
+			}
+			else
+			{
+				info "Not a individual";
+				//CTLZ-67402 - BL/PR Scorecard Start1
+				loan_application_scorecard_flag = ifNull(loan.get("ScoreCard_Flag"),"");
+				// 				if(loan_application_scorecard_flag)
+				// 				{
+				// 					info app.get("id");
+				// 					geo_res = standalone.CSEL_GeoIQ_API_BL(app.get("id"));
+				// 					info geo_res;
+				// 					Geo_list_data = geo_res.toMap();
+				// 					info Geo_list_data;
+				// 					model_score = Geo_list_data.get("data").get("model_score");
+				// 					info model_score;
+				// 					geoIQItem = Map();
+				// 					geoIQData = Map();
+				// 					geoIQList = List();
+				// 					geoIQData.put("model_score",model_score);
+				// 					geoIQItem.put("data",geoIQData);
+				// 					geoIQItem.put("status",200);
+				// 					geoIQList.add(geoIQItem);
+				// 					geoIQPayload = Map();
+				// 					geoIQPayload.put("geoIQ",geoIQList);
+				// 					case_map.put("geoIQData",geoIQPayload);
+				// 					info case_map;
+				// 					// 			return "";
+				// 				}
+				geoIQPayload = Map();
+				case_map.put("geoIQData",geoIQPayload);
+				//CTLZ-67402 - BL/PR Scorecard End 1
+				// 				Sivaranjani added
+				additionalCibilAllowed = true;
+				//
+				//CTLZ-67402 - BL Non Sole Scorecard Start 1
+				if(module.equalsIgnoreCase("Bank_details_Create"))
+				{
+					applicants = zoho.crm.getRelatedRecords("Contacts","Accounts",loan_id,1,1,{"state":"draft","sort_by":"Created_Time","sort_order":"desc"},"zohocrmall");
+					info applicants;
+				}
+				//CTLZ-67402 - BL Non Sole Scorecard Start 1
+				//
+				for each  app in applicants
+				{
+					info "app_app";
+					info app.get("Applicants_Type");
+					if(app.get("Applicants_Type").equalsIgnoreCase("Co-applicant"))
+					{
+						info "Entering into Coapplicant";
+						coapp_type = app.get("Co_Applicant_Type");
+						coapp_type1 = app.get("Co_Applicant_Type").toList(" ");
+						coapp_type2 = coapp_type1.get(0);
+						info "coapp_type2" + coapp_type2;
+						if(coapp_type2.equalsIgnoreCase("Individual"))
+						{
+							info "Individual";
+							coapp_id = app.get("Co_App_PAN_No");
+							info coapp_id;
+							query = "select Response,id from Logger where ((API='CIBIL' and API_Call_Status='Success') and Applicant_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+							info query;
+							queryMap = Map();
+							queryMap.put("select_query",query);
+							resp = invokeurl
+							[
+								url :"https://www.zohoapis.in/crm/v8/coql"
+								type :POST
+								parameters:queryMap.toString()
+								connection:"zohocrmall"
+							];
+							info resp;
+							logger_id = resp.get("data").get(0).get("id");
+							// 	info logger_id;
+							logger_value = zoho.crm.getRecordById("Logger",logger_id);
+							// 	info logger_value;
+							file_data = invokeurl
+							[
+								url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+								type :GET
+								connection:"zohocrmall"
+							];
+							// 				info file_data;
+							cibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+							// 				info cibil;
+							cibil_data = cibil.get("data").get("cibilJson");
+							// 				info cibil_data;
+							cibil_data1 = cibil_data.get(0);
+							info "cibil_data1";
+							info cibil_data1;
+							// 				info cibil_data1.toString();
+							cibil_list.add(cibil_data1);
+							cibil_map.put("cibilJson",cibil_list);
+							// 							additional_cibil = cibil.get("data").get("AdditionalCibilJson");
+							// 							if(!isNull(additional_cibil))
+							// 							{
+							// 								additional_cibil_data1 = additional_cibil.get(0);
+							// 								// 					info additional_cibil_data1.toString();
+							// 								additional_cibil_list.add(additional_cibil_data1);
+							// 								cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+							// 							}
+							// 				Additional Cibil Code
+							info additionalCibilAllowed;
+							if(additionalCibilAllowed == true && app_stage.equalsIgnoreCase("Credit Journey"))
+							{
+								info coapp_id;
+								info "Credit Journey";
+								query = "select Response,id from Logger where (((Name  = 'ADDITIONAL_CIBIL_API' and API_Call_Status='Success') and Application_Number='" + app_no + "') and Primary_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+								info query;
+								queryMap = Map();
+								queryMap.put("select_query",query);
+								resp = invokeurl
+								[
+									url :"https://www.zohoapis.in/crm/v8/coql"
+									type :POST
+									parameters:queryMap.toString()
+									connection:"zohocrmall"
+								];
+								info resp;
+								info resp.size();
+								if(!isNull(resp))
+								{
+									logger_id = resp.get("data").get(0).get("id");
+									// 	info logger_id;
+									logger_value = zoho.crm.getRecordById("Logger",logger_id);
+									// 	info logger_value;
+									file_data = invokeurl
+									[
+										url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+										type :GET
+										connection:"zohocrmall"
+									];
+									additionalcibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+									info additionalcibil;
+									add_cibil_data = additionalcibil.get("data").get("cibilJson");
+									info add_cibil_data;
+									add_cibil_data1 = add_cibil_data.get(0);
+									// 			info cibil_data1;
+									additional_cibil_list.add(add_cibil_data1);
+									cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+									additionalCibilAllowed = false;
+								}
+								else
+								{
+									info "No Additional Cibil";
+									additionalCibilAllowed = false;
+								}
+							}
+							// 				End - Additional Cibil Code
+							if(cibil_map.size() > 0)
+							{
+								// 				cibil_list.add(cibil_map);
+								case_map.put("bureauData",cibil_map);
+							}
+							else
+							{
+								return "";
+							}
+							break;
+						}
+						// 						else
+						// 						{
+						// 							info "Entity";
+						// 							coapp_cons_type = ifnull(app.get("Co_Applicant_Constitution_Type"),"");
+						// 							info coapp_cons_type;
+						// 							if(coapp_cons_type.equalsIgnoreCase("Sole Proprietor"))
+						// 							{
+						// 								info "Sole Proprietor";
+						// 								coapp_id = app.get("Co_App_PAN_No");
+						// 								query = "select Response,id from Logger where ((API='CIBIL' and API_Call_Status='Success') and Applicant_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+						// 								// 		info query;
+						// 								queryMap = Map();
+						// 								queryMap.put("select_query",query);
+						// 								resp = invokeurl
+						// 								[
+						// 									url :"https://www.zohoapis.in/crm/v8/coql"
+						// 									type :POST
+						// 									parameters:queryMap.toString()
+						// 									connection:"zohocrmall"
+						// 								];
+						// 								// 	info resp;
+						// 								logger_id = resp.get("data").get(0).get("id");
+						// 								// 	info logger_id;
+						// 								logger_value = zoho.crm.getRecordById("Logger",logger_id);
+						// 								// 	info logger_value;
+						// 								file_data = invokeurl
+						// 								[
+						// 									url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+						// 									type :GET
+						// 									connection:"zohocrmall"
+						// 								];
+						// 								// 				info file_data;
+						// 								cibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+						// 								// 				info cibil;
+						// 								cibil_data = cibil.get("data").get("cibilJson");
+						// 								// 				info cibil_data;
+						// 								cibil_data1 = cibil_data.get(0);
+						// 								info cibil_data1;
+						// 								// 				info cibil_data1.toString();
+						// 								cibil_list.add(cibil_data1);
+						// 								cibil_map.put("cibilJson",cibil_list);
+						// 								// 								additional_cibil = cibil.get("data").get("AdditionalCibilJson");
+						// 								// 								if(!isNull(additional_cibil))
+						// 								// 								{
+						// 								// 									additional_cibil_data1 = additional_cibil.get(0);
+						// 								// 									// 					info additional_cibil_data1.toString();
+						// 								// 									additional_cibil_list.add(additional_cibil_data1);
+						// 								// 									cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+						// 								// 								}
+						// 								// 				Additional Cibil Code
+						// 								if(additionalCibilAllowed == true && app_stage.equalsIgnoreCase("Credit Journey"))
+						// 								{
+						// 									info "Credit Journey";
+						// 									query = "select Response,id from Logger where (((Name  = 'ADDITIONAL_CIBIL_API' and API_Call_Status='Success') and Application_Number='" + app_no + "') and Primary_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+						// 									info query;
+						// 									queryMap = Map();
+						// 									queryMap.put("select_query",query);
+						// 									resp = invokeurl
+						// 									[
+						// 										url :"https://www.zohoapis.in/crm/v8/coql"
+						// 										type :POST
+						// 										parameters:queryMap.toString()
+						// 										connection:"zohocrmall"
+						// 									];
+						// 									info resp;
+						// 									info resp.size();
+						// 									if(!isNull(resp))
+						// 									{
+						// 										logger_id = resp.get("data").get(0).get("id");
+						// 										// 	info logger_id;
+						// 										logger_value = zoho.crm.getRecordById("Logger",logger_id);
+						// 										// 	info logger_value;
+						// 										file_data = invokeurl
+						// 										[
+						// 											url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+						// 											type :GET
+						// 											connection:"zohocrmall"
+						// 										];
+						// 										additionalcibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+						// 										info additionalcibil;
+						// 										add_cibil_data = additionalcibil.get("data").get("cibilJson");
+						// 										info add_cibil_data;
+						// 										add_cibil_data1 = add_cibil_data.get(0);
+						// 										// 			info cibil_data1;
+						// 										additional_cibil_list.add(add_cibil_data1);
+						// 										cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+						// 										additionalCibilAllowed = false;
+						// 									}
+						// 									else
+						// 									{
+						// 										additionalCibilAllowed = false;
+						// 									}
+						// 								}
+						// 								// 				End - Additional Cibil Code
+						// 								if(cibil_map.size() > 0)
+						// 								{
+						// 									// 				cibil_list.add(cibil_map);
+						// 									case_map.put("bureauData",cibil_map);
+						// 								}
+						// 								// 								info "Case_Map:" + case_map;
+						// 							}
+						// 							// 							break;
+						// 						}
+					}
+				}
+			}
+			// 			info "Case_Map:" + case_map;
+		}
+		else if(app.get("Applicants_Type").equalsIgnoreCase("Co-applicant") && app.get("Financial_Co_applicant"))
+		{
+			if(!isNull(app.get("Co_Applicant_Constitution_Type")))
+			{
+				case_map.put("applicantType",app.get("Applicants_Type"));
+				case_map.put("industryType",app.get("Entity_Industry_Type").get("name"));
+				//Sivaranjani commented the below mentioned line
+				// 				case_map.put("businessVintage",app.get("Business_Vintage1").subString(0,1));
+				//Sivaranjani added for the Business Vintage
+				info app.get("Business_Vintage1");
+				vintage_str = app.get("Business_Vintage1");
+				info vintage_str;
+				years = 0;
+				months = 0;
+				if(vintage_str != null && vintage_str != "")
+				{
+					parts = vintage_str.toList(" ");
+					for each  index in parts
+					{
+						if(index.toLowerCase() == "years" || index.toLowerCase() == "year")
+						{
+							years = ifnull(parts.get(parts.indexOf(index) - 1).toDecimal(),0);
+						}
+						if(index.toLowerCase() == "months" || index.toLowerCase() == "month")
+						{
+							months = ifnull(parts.get(parts.indexOf(index) - 1).toDecimal(),0);
+						}
+					}
+				}
+				business_vintage_decimal = years + months / 12;
+				business_vintage_decimal = business_vintage_decimal.round(2);
+				info business_vintage_decimal;
+				case_map.put("businessVintage",business_vintage_decimal);
+				//Sivaranjani ended
+				case_map.put("natureOfBusiness",app.get("Entity_Nature_of_Business"));
+				case_map.put("businessPincode",app.get("Business_Pincode"));
+				case_map.put("panNo",app.get("Co_App_PAN_No"));
+				// 			Sivaranjani added for bank
+				product_program = app.get("Product_Program");
+				info product_program;
+				// M Izzath Suhail for adding abb for applicant and coapp start 5
+				average_bal2 = 0;
+				// M Izzath Suhail for adding abb for applicant and coapp start 5
+				if(loan.get("Source_Type") == "DST" && app.get("Product_Program") == "Others" || loan.get("Source_Type") == "DSA")
+				{
+					bank = zoho.crm.getRelatedRecords("Related_List_Name_3","Contacts",app.get("id"));
+					info bank;
+					info bank.size();
+					if(bank.size() > 0)
+					{
+						info bank;
+						for each  b in bank
+						{
+							bank_record = zoho.crm.getRecordById("Bank_Details",b.get("id"));
+							info bank_record;
+							// M Izzath Suhail for adding abb for applicant and coapp start 6
+							average_bal2 = bank_record.get("Average_Balance").toNumber();
+							// M Izzath Suhail for adding abb for applicant and coapp start 6
+							if(bank_record.get("Additional_banks_details").size() > 0)
+							{
+								basic_details_list = bank_record.get("Basic_details");
+								add_bank_list = bank_record.get("Additional_banks_details");
+								for each  basic_details in basic_details_list
+								{
+									merged_bank_details = List();
+									// initialize once per basicrecord
+									basic_transaction_id = basic_details.get("Transaction_ID");
+									for each  basic_details in basic_details_list
+									{
+										merged_bank_details = List();
+										basic_transaction_id = basic_details.get("Transaction_ID");
+										info add_bank_list;
+										for each  add_bank in add_bank_list
+										{
+											transaction_id = add_bank.get("Transaction_ID");
+											if(module.equalsIgnoreCase("Recommendation") || module.equalsIgnoreCase("Parallel"))
+											{
+												info "Entering into the Recommendation";
+												if(basic_details.get("Cnsdr_for_Othr_Bnkng_Prtnr") && !isNull(basic_details.get("Statement_Type")))
+												{
+													info "Not Available";
+													if(transaction_id == basic_transaction_id)
+													{
+														ac_no = basic_details.get("A_C_No");
+														acc_analysis = add_bank.get("Account_Analysis");
+														if(!isNull(acc_analysis))
+														{
+															file_id = acc_analysis.get(0).get("file_Id");
+															file_data = invokeurl
+															[
+																url :"https://www.zohoapis.in/crm/v8/files?id=" + file_id
+																type :GET
+																connection:"zohocrmall"
+															];
+															bank = file_data.getFileContent();
+															bank_map = bank.toMap();
+															pir_data = bank_map.get("PIR:Data");
+															target_acc_no = 50100298941831;
+															acc_analysis_list = pir_data.get("AccountAnalysis");
+															// 													info acc_analysis_list;
+															acc_xns = pir_data.get("Xns");
+															matched_account = Map();
+															// Loop through each AccountAnalysis object
+															for each  account_item in acc_analysis_list
+															{
+																acc_info = account_item.get("$");
+																if(!isNull(acc_info))
+																{
+																	acc_no = acc_info.get("accountNo");
+																	if(acc_no == ac_no)
+																	{
+																		for each  xns_data in acc_xns
+																		{
+																			if(xns_data.get("$").get("accountNo") == acc_no)
+																			{
+																				matched_account = account_item;
+																				matched_account.put("Xns",xns_data.toList());
+																				break;
+																			}
+																		}
+																	}
+																}
+															}
+															merged_bank_details.add(matched_account);
+														}
+													}
+												}
+												else if(basic_details.get("Cnsdr_for_Othr_Bnkng_Prtnr") && isNull(basic_details.get("Statement_Type")))
+												{
+													info "Scanned Api";
+													acc_analysis = basic_details.get("Scanned_Account_Analysis");
+													// 											info acc_analysis;
+													if(!isNull(acc_analysis))
+													{
+														ac_no = basic_details.get("A_C_No");
+														file_id = acc_analysis.get(0).get("file_Id");
+														file_data = invokeurl
+														[
+															url :"https://www.zohoapis.in/crm/v8/files?id=" + file_id
+															type :GET
+															connection:"zohocrmall"
+														];
+														bank = file_data.getFileContent();
+														bank_map = bank.toMap();
+														pir_data = bank_map.get("PIR:Data");
+														acc_analysis_list = pir_data.get("AccountAnalysis");
+														matched_account = Map();
+														for each  account_item in acc_analysis_list
+														{
+															acc_info = account_item.get("$");
+															// 														info acc_info;
+															if(!isNull(acc_info))
+															{
+																acc_no = acc_info.get("accountNo");
+																if(acc_no == ac_no)
+																{
+																	for each  xns_data in acc_xns
+																	{
+																		if(xns_data.get("$").get("accountNo") == acc_no)
+																		{
+																			matched_account = account_item;
+																			matched_account.put("Xns",xns_data.toList());
+																			break;
+																		}
+																	}
+																}
+															}
+														}
+														// 												info matched_account;
+														merged_bank_details.add(matched_account);
+														// 												info merged_bank_details;
+													}
+												}
+												// Ended
+											}
+											else
+											{
+												info "Applicant";
+												if(transaction_id == basic_transaction_id)
+												{
+													acc_analysis = add_bank.get("Account_Analysis");
+													if(!isNull(acc_analysis))
+													{
+														file_id = acc_analysis.get(0).get("file_Id");
+														file_data = invokeurl
+														[
+															url :"https://www.zohoapis.in/crm/v8/files?id=" + file_id
+															type :GET
+															connection:"zohocrmall"
+														];
+														bank = file_data.getFileContent();
+														bank_map = bank.toMap();
+														info bank_map;
+														pir_data = bank_map.get("PIR:Data");
+														acc_analysis_list = pir_data.get("AccountAnalysis");
+														acc_xns = pir_data.get("Xns");
+														// 												info acc_analysis_list;
+														for each  acc in acc_analysis_list
+														{
+															for each  xns_data in acc_xns
+															{
+																if(xns_data.get("$").get("accountNo") == acc.get("$").get("accountNo"))
+																{
+																	acc.put("Xns",xns_data.toList());
+																	merged_bank_details.add(acc);
+																	break;
+																}
+															}
+														}
+													}
+												}
+											}
+										}
+										// end inner loop
+										// 								info merged_bank_details;
+										if(merged_bank_details.size() > 0)
+										{
+											for each  acc_item in merged_bank_details
+											{
+												// 										info acc_item;
+												bank_list.add(acc_item);
+											}
+										}
+									}
+									unique_bank_list = List();
+									processed_account_nos = List();
+									for each  bank in bank_list
+									{
+										account_no = bank.get("$").get("accountNo");
+										if(!processed_account_nos.contains(account_no))
+										{
+											unique_bank_list.add(bank);
+											processed_account_nos.add(account_no);
+										}
+									}
+									bank_list = unique_bank_list;
+									info bank_list;
+									// 									if(merged_bank_details.size() > 0)
+									// 									{
+									// 										for each  acc_item in merged_bank_details
+									// 										{
+									// 											// 										info acc_item;
+									// 											bank_list.add(acc_item);
+									// 										}
+									// 									}
+								}
+								// 							info bank_list.size();
+								if(bank_list.size() > 0)
+								{
+									bankmap.put("bankdetails",bank_list);
+									case_map.put("bankData",bankmap);
+									// 									case_map.put("bankData",null);
+								}
+								// 								info case_map;
+							}
+						}
+					}
+					else
+					{
+						if(module == "Bank_details")
+						{
+							return "";
+						}
+					}
+				}
+				else
+				{
+					if(!isNull(product_program))
+					{
+						// 						info "Product program not null";
+						if(product_program == "Pre-Approved Incremental Loan2" || product_program == "VF Repayment Surrogate" || product_program == "Bureau RTR Surrogate")
+						{
+							info "Product Program" + product_program;
+							case_map.put("bankData",null);
+						}
+					}
+				}
+				// 			Ended
+				// M Izzath Suhail for adding abb for applicant and coapp start 2
+				if(module.equalsIgnoreCase("Inprinciple"))
+				{
+					// 				case_map.put("abb",in_principle.get("Primary_Applicant_ABB"));
+					case_map.put("abb",average_bal2);
+				}
+				else if(module.equalsIgnoreCase("Recommendation"))
+				{
+					case_map.put("abb",overall.get("Financial_Co_Applicant_s_Monthly_ABB"));
+				}
+				// M Izzath Suhail for adding abb for applicant and coapp end 2
+				if(app.get("Co_Applicant_Constitution_Type").equalsIgnoreCase("Sole Proprietor"))
+				{
+					coapp_id = app.get("Co_App_PAN_No");
+					query = "select Response,id from Logger where ((API='CIBIL' and API_Call_Status='Success') and Applicant_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+					// 		info query;
+					queryMap = Map();
+					queryMap.put("select_query",query);
+					resp = invokeurl
+					[
+						url :"https://www.zohoapis.in/crm/v8/coql"
+						type :POST
+						parameters:queryMap.toString()
+						connection:"zohocrmall"
+					];
+					// 	info resp;
+					logger_id = resp.get("data").get(0).get("id");
+					// 	info logger_id;
+					logger_value = zoho.crm.getRecordById("Logger",logger_id);
+					// 	info logger_value;
+					file_data = invokeurl
+					[
+						url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+						type :GET
+						connection:"zohocrmall"
+					];
+					// 				info file_data;
+					cibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+					// 				info cibil;
+					cibil_data = cibil.get("data").get("cibilJson");
+					// 				info cibil_data;
+					cibil_data1 = cibil_data.get(0);
+					// 					info cibil_data1;
+					// 				info cibil_data1.toString();
+					cibil_list.add(cibil_data1);
+					cibil_map.put("cibilJson",cibil_list);
+					// 					additional_cibil = cibil.get("data").get("AdditionalCibilJson");
+					// 					if(!isNull(additional_cibil))
+					// 					{
+					// 						additional_cibil_data1 = additional_cibil.get(0);
+					// 						// 					info additional_cibil_data1.toString();
+					// 						additional_cibil_list.add(additional_cibil_data1);
+					// 						cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+					// 					}
+					// 				Additional Cibil Code
+					if(app_stage.equalsIgnoreCase("Credit Journey"))
+					{
+						info "Credit Journey";
+						query = "select Response,id from Logger where (((Name  = 'ADDITIONAL_CIBIL_API' and API_Call_Status='Success') and Application_Number='" + app_no + "') and Primary_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+						info query;
+						queryMap = Map();
+						queryMap.put("select_query",query);
+						resp = invokeurl
+						[
+							url :"https://www.zohoapis.in/crm/v8/coql"
+							type :POST
+							parameters:queryMap.toString()
+							connection:"zohocrmall"
+						];
+						// 						info resp;
+						info resp.size();
+						if(!isNull(resp))
+						{
+							logger_id = resp.get("data").get(0).get("id");
+							// 	info logger_id;
+							logger_value = zoho.crm.getRecordById("Logger",logger_id);
+							// 	info logger_value;
+							file_data = invokeurl
+							[
+								url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+								type :GET
+								connection:"zohocrmall"
+							];
+							additionalcibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+							// 							info additionalcibil;
+							add_cibil_data = additionalcibil.get("data").get("cibilJson");
+							// 							info add_cibil_data;
+							add_cibil_data1 = add_cibil_data.get(0);
+							// 			info cibil_data1;
+							additional_cibil_list.add(add_cibil_data1);
+							cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+						}
+					}
+					// 				End - Additional Cibil Code
+					if(cibil_map.size() > 0)
+					{
+						// 				cibil_list.add(cibil_map);
+						case_map.put("bureauData",cibil_map);
+					}
+					// 					info "Case_Map:" + case_map; 
+				}
+				else
+				{
+					additionalCibilAllowed = true;
+					for each  app in applicants
+					{
+						if(app.get("Applicants_Type").equalsIgnoreCase("Co-applicant"))
+						{
+							// 							info "Entering into Coapplicant";
+							coapp_type1 = app.get("Co_Applicant_Type").toList(" ");
+							coapp_type2 = coapp_type1.get(0);
+							// 							info "coapp_type2" + coapp_type2;
+							if(coapp_type2.equalsIgnoreCase("Individual"))
+							{
+								// 								info "Individual";
+								coapp_id = app.get("Co_App_PAN_No");
+								// 								info coapp_id;
+								query = "select Response,id from Logger where ((API='CIBIL' and API_Call_Status='Success') and Applicant_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+								// 		info query;
+								queryMap = Map();
+								queryMap.put("select_query",query);
+								resp = invokeurl
+								[
+									url :"https://www.zohoapis.in/crm/v8/coql"
+									type :POST
+									parameters:queryMap.toString()
+									connection:"zohocrmall"
+								];
+								// 	info resp;
+								logger_id = resp.get("data").get(0).get("id");
+								// 	info logger_id;
+								logger_value = zoho.crm.getRecordById("Logger",logger_id);
+								// 	info logger_value;
+								file_data = invokeurl
+								[
+									url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+									type :GET
+									connection:"zohocrmall"
+								];
+								// 				info file_data;
+								cibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+								// 				info cibil;
+								cibil_data = cibil.get("data").get("cibilJson");
+								// 				info cibil_data;
+								cibil_data1 = cibil_data.get(0);
+								// 								info cibil_data1;
+								// 				info cibil_data1.toString();
+								cibil_list.add(cibil_data1);
+								cibil_map.put("cibilJson",cibil_list);
+								// 								additional_cibil = cibil.get("data").get("AdditionalCibilJson");
+								// 								if(!isNull(additional_cibil))
+								// 								{
+								// 									additional_cibil_data1 = additional_cibil.get(0);
+								// 									// 					info additional_cibil_data1.toString();
+								// 									additional_cibil_list.add(additional_cibil_data1);
+								// 									cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+								// 								}
+								// 				Additional Cibil Code
+								if(additionalCibilAllowed = true && app_stage.equalsIgnoreCase("Credit Journey"))
+								{
+									info "Credit Journey";
+									query = "select Response,id from Logger where (((Name  = 'ADDITIONAL_CIBIL_API' and API_Call_Status='Success') and Application_Number='" + app_no + "') and Primary_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+									// 									info query;
+									queryMap = Map();
+									queryMap.put("select_query",query);
+									resp = invokeurl
+									[
+										url :"https://www.zohoapis.in/crm/v8/coql"
+										type :POST
+										parameters:queryMap.toString()
+										connection:"zohocrmall"
+									];
+									// 									info resp;
+									// 									info resp.size();
+									if(!isNull(resp))
+									{
+										logger_id = resp.get("data").get(0).get("id");
+										// 	info logger_id;
+										logger_value = zoho.crm.getRecordById("Logger",logger_id);
+										// 	info logger_value;
+										file_data = invokeurl
+										[
+											url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+											type :GET
+											connection:"zohocrmall"
+										];
+										additionalcibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+										// 										info additionalcibil;
+										add_cibil_data = additionalcibil.get("data").get("cibilJson");
+										// 										info add_cibil_data;
+										add_cibil_data1 = add_cibil_data.get(0);
+										// 			info cibil_data1;
+										additional_cibil_list.add(add_cibil_data1);
+										cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+									}
+									else
+									{
+										additionalCibilAllowed = false;
+									}
+								}
+								// 				End - Additional Cibil Code
+								if(cibil_map.size() > 0)
+								{
+									// 				cibil_list.add(cibil_map);
+									case_map.put("bureauData",cibil_map);
+								}
+							}
+							else
+							{
+								// 								info "Entity";
+								coapp_cons_type = app.get("Co_Applicant_Constitution_Type");
+								info coapp_cons_type;
+								if(coapp_cons_type.equalsIgnoreCase("Sole Proprietor"))
+								{
+									info "Sole Proprietor";
+									coapp_id = app.get("Co_App_PAN_No");
+									query = "select Response,id from Logger where ((API='CIBIL' and API_Call_Status='Success') and Applicant_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+									// 		info query;
+									queryMap = Map();
+									queryMap.put("select_query",query);
+									resp = invokeurl
+									[
+										url :"https://www.zohoapis.in/crm/v8/coql"
+										type :POST
+										parameters:queryMap.toString()
+										connection:"zohocrmall"
+									];
+									// 	info resp;
+									logger_id = resp.get("data").get(0).get("id");
+									// 	info logger_id;
+									logger_value = zoho.crm.getRecordById("Logger",logger_id);
+									// 	info logger_value;
+									file_data = invokeurl
+									[
+										url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+										type :GET
+										connection:"zohocrmall"
+									];
+									// 				info file_data;
+									cibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+									// 				info cibil;
+									cibil_data = cibil.get("data").get("cibilJson");
+									// 				info cibil_data;
+									cibil_data1 = cibil_data.get(0);
+									// 									info cibil_data1;
+									// 				info cibil_data1.toString();
+									cibil_list.add(cibil_data1);
+									cibil_map.put("cibilJson",cibil_list);
+									// 									additional_cibil = cibil.get("data").get("AdditionalCibilJson");
+									// 									if(!isNull(additional_cibil))
+									// 									{
+									// 										additional_cibil_data1 = additional_cibil.get(0);
+									// 										// 					info additional_cibil_data1.toString();
+									// 										additional_cibil_list.add(additional_cibil_data1);
+									// 										cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+									// 									}
+									// 				Additional Cibil Code
+									if(additionalCibilAllowed = true && app_stage.equalsIgnoreCase("Credit Journey"))
+									{
+										info "Credit Journey";
+										query = "select Response,id from Logger where (((Name  = 'ADDITIONAL_CIBIL_API' and API_Call_Status='Success') and Application_Number='" + app_no + "') and Primary_PAN='" + coapp_id + "') order by Created_Time desc limit 0,1";
+										// 										info query;
+										queryMap = Map();
+										queryMap.put("select_query",query);
+										resp = invokeurl
+										[
+											url :"https://www.zohoapis.in/crm/v8/coql"
+											type :POST
+											parameters:queryMap.toString()
+											connection:"zohocrmall"
+										];
+										info resp;
+										info resp.size();
+										if(!isNull(resp))
+										{
+											logger_id = resp.get("data").get(0).get("id");
+											// 	info logger_id;
+											logger_value = zoho.crm.getRecordById("Logger",logger_id);
+											// 	info logger_value;
+											file_data = invokeurl
+											[
+												url :"https://www.zohoapis.in/crm/v8/files?id=" + logger_value.get("API_Response_File").get(0).get("file_Id")
+												type :GET
+												connection:"zohocrmall"
+											];
+											additionalcibil = file_data.get("data").get("execution_path").get(0).get("response").get("response_body");
+											info additionalcibil;
+											add_cibil_data = additionalcibil.get("data").get("cibilJson");
+											info add_cibil_data;
+											add_cibil_data1 = add_cibil_data.get(0);
+											// 			info cibil_data1;
+											additional_cibil_list.add(add_cibil_data1);
+											cibil_map.put("AdditionalCibilJson",additional_cibil_list);
+										}
+										else
+										{
+											additionalCibilAllowed = false;
+										}
+									}
+									// 				End - Additional Cibil Code
+									if(cibil_map.size() > 0)
+									{
+										// 				cibil_list.add(cibil_map);
+										case_map.put("bureauData",cibil_map);
+									}
+									// 									info "Case_Map:" + case_map;
+								}
+							}
+						}
+					}
+				}
+			}
+			//CTLZ-67402 - BL/PR Scorecard Start 2
+			loan_application_scorecard_flag = ifNull(loan.get("ScoreCard_Flag"),"");
+			// 			if(loan_application_scorecard_flag)
+			// 			{
+			// 				geo_res = standalone.CSEL_GeoIQ_API_BL(app.get("id"));
+			// 				// 				info geo_res;
+			// 				Geo_list_data = geo_res.toMap();
+			// 				// 				info Geo_list_data;
+			// 				model_score = Geo_list_data.get("data").get("model_score");
+			// 				// 				info model_score;
+			// 				geoIQItem = Map();
+			// 				geoIQData = Map();
+			// 				geoIQList = List();
+			// 				geoIQData.put("model_score",model_score);
+			// 				geoIQItem.put("data",geoIQData);
+			// 				geoIQItem.put("status",200);
+			// 				geoIQList.add(geoIQItem);
+			// 				geoIQPayload = Map();
+			// 				geoIQPayload.put("geoIQ",geoIQList);
+			// 				case_map.put("geoIQData",geoIQPayload);
+			// 				// 				info case_map;
+			// 				// 			return "";
+			// 			}
+			geoIQPayload = Map();
+			case_map.put("geoIQData",geoIQPayload);
+			//CTLZ-67402 - BL/PR Scorecard End 2
+		}
+		// Only add the map if it contains data
+		if(case_map.size() > 0)
+		{
+			details.add(case_map);
+		}
+		geoIQ_present = false;
+		bank_present = false;
+		cibil_present = false;
+		for each  detail in details
+		{
+			if(detail.containKey("geoIQData"))
+			{
+				geoIQ_present = true;
+			}
+			if(detail.containKey("bankData"))
+			{
+				bank_present = true;
+			}
+			if(detail.containKey("bureauData"))
+			{
+				cibil_present = true;
+			}
+		}
+		status_message = "";
+		if(geoIQ_present)
+		{
+			if(status_message != "")
+			{
+				status_message = status_message + ", ";
+			}
+			status_message = status_message + "GEO";
+		}
+		if(bank_present)
+		{
+			if(status_message != "")
+			{
+				status_message = status_message + ", ";
+			}
+			status_message = status_message + "BANK";
+		}
+		if(cibil_present)
+		{
+			if(status_message != "")
+			{
+				status_message = status_message + ", ";
+			}
+			status_message = status_message + "CIBIL";
+		}
+		info status_message;
+	}
+	// 	info details;
+	complete_map.put("applicantDetails",details);
+	// 	info complete_map;
+	// 	info details;
+	data_map = Map();
+	data_map.put("consent_obtained",true);
+	data_map.put("details",complete_map);
+	include_list = List();
+	include_list.add("execution_path");
+	//data_map.put("include",include_list);
+	finalDetails = Map();
+	finalDetails.put("data",data_map);
+	finalDetails.put("include",include_list);
+	info finalDetails;
+	urlval = "https://phonebridge.zoho.in/bfsibridge/v1/features/CHOLA_INTERNAL/actions/risk_score_card";
+	response = invokeurl
+	[
+		url :urlval
+		type :POST
+		parameters:finalDetails.toString()
+		headers:header_data
+		connection:"bfsibridgeusingoauth"
+		content-type:"application/json"
+	];
+	loggermap = Map();
+	info response;
+	loggermap.put("Response_Time",zoho.currenttime);
+	loggermap.put("API","Scorecard API");
+	loggermap.put("Name","Scorecard API");
+	loggermap.put("Application_Number",app_no);
+	loggermap.put("Loan_Application",{"id":loan_id});
+	loggermap.put("Loan_Application_ID",loan_id.toString());
+	loggermap.put("Status_Message",status_message);
+	loggermap.put("Response",response);
+	responsetFile = response.toFile("API_Response.txt");
+	responsetFile.setParamName("file");
+	response_file = invokeurl
+	[
+		url :"https://www.zohoapis.in/crm/v8/files"
+		type :POST
+		files:responsetFile
+		connection:"zohocrmall"
+	];
+	// 	CTLZ-51444_DMS_
+	fileid2 = response_file.get("data").get(0).get("details").get("id");
+	loggermap.put("API_Response_File",{{"file_id":fileid2}});
+	if(response.get("data").get("execution_status") == "executed")
+	{
+		loggermap.put("API_Call_Status","Success");
+		loggermap.put("Time_Taken",(response.get("data").get("execution_path").get(0).get("time_taken") / 1000).toString() + " secs");
+	}
+	else
+	{
+		loggermap.put("API_Call_Status","Failed");
+	}
+	resp = zoho.crm.createRecord("Logger",loggermap);
+	// 	info resp.get("id").get("execution_path");
+	resp_logger_id_ = resp.get("id");
+	info resp_logger_id_;
+	if(!isNull(resp_logger_id_) && !resp_logger_id_.isEmpty())
+	{
+		dms_id = standalone.scorecard_txt_to_dms(resp_logger_id_);
+		info dms_id;
+		app_name_id = loan.get("Loan_Application_No");
+		app_name = loan.get("id");
+		// Create Logger Map
+		dms_logger_map = Map();
+		dms_logger_map.put("Name",app_name_id);
+		dms_logger_map.put("Loan_Application",app_name);
+		dms_logger_map.put("DMS_ID",dms_id);
+		dms_logger_map.put("Document_ID",fileid2);
+		dms_logger_map.put("Document_Name","Score_card.txt");
+		dms_logger_map.put("Module_Api_Name","Score Card");
+		dms_logger_map.put("Field_Api_Name","Score");
+		if(!isNull(dms_id) && !dms_id.isEmpty())
+		{
+			record_logger = zoho.crm.createRecord("DMS",dms_logger_map);
+			info record_logger;
+		}
+		else
+		{
+			info "DMS creation skipped. DMS ID missing.";
+		}
+	}
+	else
+	{
+		info "DMS creation skipped. File ID ";
+	}
+	if(response.get("data").get("execution_status") == "executed")
+	{
+		response_val = response.get("data").get("execution_path").get(0).get("response").get("response_body").toMap();
+		applicant_details = response_val.get("applicantDetails");
+		info applicant_details;
+		details = List();
+		app_data = Map();
+		app_data.put("final_profile",response_val.get("finalProfile"));
+		app_data.put("final_risk",response_val.get("finalRiskSegment"));
+		app_data.put("final_offer",response_val.get("finalOfferAmount"));
+		loandetails = Map();
+		for each  app in applicant_details
+		{
+			info "App:" + app;
+			if(app.get("applicantType").equalsIgnoreCase("Applicant"))
+			{
+				app_data.put("app_profile",app.get("profile"));
+				app_data.put("app_risksegment",app.get("riskSegment"));
+				app_data.put("app_offerAmount",app.get("offerAmount"));
+				app_data.put("app_perfiosSegment",app.get("perfiosSegment"));
+				if(loan_type.equalsIgnoreCase("Business Loan"))
+				{
+					loandetails.put("BL_Primaryapp_Risk_Segment",response_val.get("finalCustomerSegmentation"));
+				}
+			}
+			else if(app.get("applicantType").equalsIgnoreCase("Co-Applicant"))
+			{
+				app_data.put("coapp_profile",app.get("profile"));
+				app_data.put("coapp_risksegment",app.get("riskSegment"));
+				app_data.put("coapp_offerAmount",app.get("offerAmount"));
+				if(loan_type.equalsIgnoreCase("Business Loan"))
+				{
+					loandetails.put("BL_Financial_Coapp_Risk_Segment",response_val.get("finalCustomerSegmentation"));
+				}
+			}
+		}
+		info loandetails;
+		info zoho.crm.updateRecord("Accounts",loan_id,loandetails);
+		info "App_data_map:" + app_data;
+		details.add(app_data);
+		info details;
+	}
+	return {"status":"Success","response":response};
+	// 	return "hi";
+}
+catch (err)
+{
+	dmp = Map();
+	dmp.put("From","Deluge Function");
+	dmp.put("Function Name","Score Card Test Function");
+	dmp.put("Name","Score_card_test_fn");
+	emp = Map();
+	emp.put("details",dmp);
+	emp.put("error_message",err.toString());
+	emp.put("action_performed","Score_card_test_fn > Overall catch");
+	info emp;
+	info standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
+}
+return "";
+}
