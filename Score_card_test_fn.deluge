@@ -1,10 +1,11 @@
-string button.Perfios_link(String id)
+string standalone.test_perfios_online(String id)
 {
 /*Modification History
 CTLZ-48279  Include "employmentType" in Perfios BSA API Request Payload			Alan			25-Feb-2026
 CTLZ-48410  Choice ALL Flow Enhancement – Use Existing API for AA with			Alan			09-Mar-2026  
 Recurring Consent Screens & S3 Bucket Provision for Bulk Upload Results		
 CTLZ-49330  Smart Routing Enhancement											Prathiba		21-Apr-2026	
+Novel Standalone copy for the Novel journey: no Account Aggregator after a Novel reject, returns "LINK:" instead of openUrl
 */
 dmp = Map();
 dmp.put("From","Deluge Function");
@@ -12,28 +13,14 @@ dmp.put("Function Name","Perfios_link");
 dmp.put("Name","Perfios_link");
 try 
 {
+	// bank details are looked up below, when the Perfios request is built (nothing comes from CSEL_BANK_PROCESS_SELECTION)
 	instituition_List = List();
 	bfsi_bridge_domain = zoho.crm.getOrgVariable("BFSIBridgeDomain");
 	bank_details = zoho.crm.getRecordById("Bank_Details",id);
 	loan_type = bank_details.get("Loan_Type");
 	email_id = ifnull(bank_details.get("Email_ID"),"");
-	//perfios cr
-	if(bank_details.get("Save_Widget"))
-	{
-		return "Please save the Self/Sister Name details to proceed further.";
-	}
-	if(isNull(bank_details.get("Self_Names_JSON")))
-	{
-		return "Please save the Self/Sister Name details to proceed further.";
-	}
-	// 	jagathees CTLZ-58562 -start
-	is_rbi_validation = standalone.CSEL_BANKING_RBI_VALIDATION(id);
-	info is_rbi_validation;
-	if(is_rbi_validation == "true")
-	{
-		return "The selected bank supports Account Aggregator/Net Banking. Please choose 'Send Link to Customer' to enable the customer to complete Perfios online.";
-	}
-	// 	jagathees CTLZ-58562 -end 
+	// Novel
+	novel_cancelled = ifnull(bank_details.get("Novel_Cancelled"),false);
 	try 
 	{
 		SL_DP_datas = bank_details.get("SL_DP_Data");
@@ -48,25 +35,7 @@ try
 					{
 						return "Kindly select 'Name of the Bank' in Account Details";
 					}
-					info "Prathi Check";
-					ins_det = Map();
-					query = "select Institution_ID,Netbanking_Available,AA_Available,Statement_Available from Institution_ID_Master where (id='" + sl_dps.get("Name_of_the_Bank").get("id") + "')";
-					queryMap = Map();
-					queryMap.put("select_query",query);
-					resp = invokeurl
-					[
-						url :"https://www.zohoapis.in/crm/v8/coql"
-						type :POST
-						parameters:queryMap.toString()
-						connection:"zohocrmall"
-					];
-					info resp.get("data").get(0);
-					ins_det.put("Instituition_id",resp.get("data").get(0).get("Institution_ID"));
-					ins_det.put("Netbanking_Available",resp.get("data").get(0).get("Netbanking_Available"));
-					ins_det.put("AA_Available",resp.get("data").get(0).get("AA_Available"));
-					ins_det.put("Statement_Available",resp.get("data").get(0).get("Statement_Available"));
-					info ins_det;
-					instituition_List.add(ins_det);
+					// the bank details of this row are read below, one query per row, when the new Perfios request is built
 				}
 				//end by Prathiba
 				info instituition_List;
@@ -77,7 +46,7 @@ try
 					business_details = zoho.crm.getRecordById("Accounts",loan_id);
 					if(business_details.get("Banking_Requirement_Type") == "With ABB Prime")
 					{
-						iterations = {1,2,3,4,5,6,7,8,9,10,11,12};
+						iterations = {1,2,3,4,5,6,7,8,9,10,11,12,13};
 					}
 					else if(loan_type.equalsIgnoreCase("Professional Loan") && business_details.get("Month_Bank_Statement_Requirement") == "Yes")
 					{
@@ -217,6 +186,7 @@ try
 				{
 					where = i.get("Where_would_you_want_to_upload_bank_statements");
 					subform_id = i.get("id");
+					s_no = ifnull(i.get("LinkingModule52_Serial_Number"),1);
 					acc_type = i.get("Account_Type");
 					//search and if yes use same link else new
 					bank_type = "additional";
@@ -589,6 +559,50 @@ try
 		// 	second_bank = bank_details.get("second_bank");
 		//perfios cr
 		SL_DP_data = bank_details.get("SL_DP_Data");
+		// ---- Bank details for the data sources: one query per bank row, like the live function
+		// rows = every bank not processed yet + the bank of the row being processed now (s_no)
+		bank_not_found = false;
+		for each  sd in SL_DP_data
+		{
+			if(isNull(sd.get("Transaction_ID")) || (sd.get("S_NO") == s_no && sd.get("Type") == "Perfios Online"))
+			{
+				sd_bank = ifnull(sd.get("Name_of_the_Bank"),Map()).get("id");
+				if(isNull(sd_bank))
+				{
+					bank_not_found = true;
+				}
+				else
+				{
+					bk_query = "select Institution_ID,Netbanking_Available,AA_Available,Statement_Available from Institution_ID_Master where (id='" + sd_bank + "')";
+					bk_query_map = Map();
+					bk_query_map.put("select_query",bk_query);
+					bk_resp = invokeurl
+					[
+						url :"https://www.zohoapis.in/crm/v8/coql"
+						type :POST
+						parameters:bk_query_map.toString()
+						connection:"zohocrmall"
+					];
+					if(bk_resp != null && bk_resp != "" && bk_resp.get("data") != null && bk_resp.get("data").size() > 0)
+					{
+						ins_det = Map();
+						ins_det.put("Instituition_id",bk_resp.get("data").get(0).get("Institution_ID"));
+						ins_det.put("Netbanking_Available",bk_resp.get("data").get(0).get("Netbanking_Available"));
+						ins_det.put("AA_Available",bk_resp.get("data").get(0).get("AA_Available"));
+						ins_det.put("Statement_Available",bk_resp.get("data").get(0).get("Statement_Available"));
+						instituition_List.add(ins_det);
+					}
+					else
+					{
+						bank_not_found = true;
+					}
+				}
+			}
+		}
+		if(bank_not_found)
+		{
+			return "Unable to read the bank details. Please try again.";
+		}
 		//perfios cr
 		current_month = zoho.currentdate.getMonth();
 		current_year = zoho.currentdate.getYear();
@@ -792,7 +806,7 @@ try
 		transaction_id = "CHOLA" + app_no + curr;
 		header_data = Map();
 		header_data.put("X-SERVICE-NAME","ZohoCRM");
-		header_data.put("X-SERVICE-ORG","60018094468");
+		header_data.put("X-SERVICE-ORG","PASTE-UAT-ORG-ID"); // UAT: paste your test line (file 73ce7c35, line 787)
 		info header_data;
 		details = Map();
 		// 		details.put("transaction_id",transaction_id);
@@ -869,14 +883,13 @@ try
 		details.put("productType","LOS1");
 		details.put("apiVersion",2.1);
 		details.put("vendorId","csel");
-		// 		details.put("transactionCompleteCallbackUrl","https://" + zoho.crm.getOrgVariable("Local_Cloud_WSO2") + ".chola.murugappa.com/cselcallbackapi/1.0.0/perfios");
-		details.put("transactionCompleteCallbackUrl","https://zohoapis.in/bfsibridge/v1/features/INSIGHTS/webhooks/generate_link?zapikey=1003.f1b54f13fe95ca73f922548c3d846d4e.a75be7882beb98b1a3389d256880af63");
+		details.put("transactionCompleteCallbackUrl","PASTE-UAT-CALLBACK-URL"); // UAT: paste your test line (file ae571d74, line 28)
 		details.put("returnUrl","https://cifcl.in/ms.html");
 		details.put("facility","NONE");
 		// 		 jagatheees -CTLZ-76214  start
 		details.put("permanentAccountNumber",pan_number);
 		//details.put("dateOfBirth",date_of_birth);
-		//details.put("mobileNumber",mobileNumber);
+		details.put("mobileNumber",mobileNumber);
 		//added by Prathiba
 		datasource = List();
 		institution_total_list = List();
@@ -896,7 +909,7 @@ try
 					aa_applicable = ifnull(constitution,"").equalsIgnoreCase("Sole Proprietor");
 				}
 				info aa_applicable;
-				if(!datasource.contains("ACCOUNT_AGGREGATOR") && aa_applicable)
+				if(!datasource.contains("ACCOUNT_AGGREGATOR") && aa_applicable && !novel_cancelled)
 				{
 					if(ifnull(ins.get("AA_Available"),"No").equalsIgnoreCase("Yes"))
 					{
@@ -923,6 +936,7 @@ try
 				details.put("dataSourcePriority",{"dataSource":datasource});
 			}
 		}
+		info "Perfios data sources: " + datasource + " | banks: " + institution_total_list + " | Novel cancelled: " + novel_cancelled;
 		//end by Prathiba
 		info details;
 		final_list = List();
@@ -969,11 +983,11 @@ try
 								{
 									if(field == "Sanction_Limit_OD_CC_Month")
 									{
-										sanction_limit.add({"amount":sl_dp.get(field + i)});
+										sanction_limit.add({"amount":ifnull(sl_dp.get(field + i),0)});
 									}
 									else
 									{
-										drawing_power.add({"amount":sl_dp.get(field + i)});
+										drawing_power.add({"amount":ifnull(sl_dp.get(field + i),0)});
 									}
 								}
 							}
@@ -1142,8 +1156,7 @@ try
 		execute = Map();
 		execute.put("consent_obtained",true);
 		execute.put("details",details1);
-		execute.put("webhook_url","https://www.zohoapis.in/crm/v2/functions/webhook_response/actions/execute?auth_type=apikey&zapikey=1003.995663d627061e0ba4f2ba09cba2795c.ebc870ff229573a3c56abc33484c23f8");
-		// execute.put("webhook_url","https://webhook.site/12afb502-c923-4930-9ed2-9ad7690d8a97");
+		execute.put("webhook_url","PASTE-UAT-WEBHOOK-URL"); // UAT: paste your test line (file ae571d74, line 286)
 		//info execute;
 		lt = List();
 		lt.add("execution_path");
@@ -1261,6 +1274,7 @@ try
 			payload.put("USER_NAME","CHOLA CSEL Traditional");
 			payload.put("PERFIOS_LINK",url);
 			payload.put("subject","CIFCL Loan | Perfios Banking");
+			payload.put("NAME","Perfios");
 			payload.put("fromCode","NOREPLY");
 			toMailId = List();
 			toMailId.add(email_id);
@@ -1384,7 +1398,8 @@ try
 		else
 		{
 			// 		url = "https://" + url;
-			openUrl(url,"new window");
+			// live button: openUrl(url,"new window"); - the parent opens the link from this return value
+			return "LINK:" + url;
 		}
 	}
 	else
