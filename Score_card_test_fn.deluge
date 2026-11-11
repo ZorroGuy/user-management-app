@@ -2,88 +2,91 @@ string standalone.test_perfios_online(String id)
 {
 /*Modification History
 CTLZ-48279  Include "employmentType" in Perfios BSA API Request Payload			Alan			25-Feb-2026
-CTLZ-48410  Choice ALL Flow Enhancement – Use Existing API for AA with			Alan			09-Mar-2026  
-Recurring Consent Screens & S3 Bucket Provision for Bulk Upload Results		
-CTLZ-49330  Smart Routing Enhancement											Prathiba		21-Apr-2026	
+CTLZ-48410  Choice ALL Flow Enhancement – Use Existing API for AA with			Alan			09-Mar-2026
+Recurring Consent Screens & S3 Bucket Provision for Bulk Upload Results
+CTLZ-49330  Smart Routing Enhancement											Prathiba		21-Apr-2026
 Novel Standalone copy for the Novel journey: no Account Aggregator after a Novel reject, returns "LINK:" instead of openUrl
+Clean-up: commented-out code and debug info lines removed, variables renamed, section comments added. No logic change.
 */
+
+// =====================================================================
+// 1. SET-UP: error map, Bank Details record, org variable
+// =====================================================================
 dmp = Map();
 dmp.put("From","Deluge Function");
 dmp.put("Function Name","Perfios_link");
 dmp.put("Name","Perfios_link");
-try 
+try
 {
 	// bank details are looked up below, when the Perfios request is built (nothing comes from CSEL_BANK_PROCESS_SELECTION)
-	instituition_List = List();
+	institution_list = List();
 	bfsi_bridge_domain = zoho.crm.getOrgVariable("BFSIBridgeDomain");
 	bank_details = zoho.crm.getRecordById("Bank_Details",id);
 	loan_type = bank_details.get("Loan_Type");
 	email_id = ifnull(bank_details.get("Email_ID"),"");
 	// Novel
 	novel_cancelled = ifnull(bank_details.get("Novel_Cancelled"),false);
-	try 
+
+	// =====================================================================
+	// 2. VALIDATE OD / CC SANCTION LIMIT AND DRAWING POWER
+	// =====================================================================
+	try
 	{
-		SL_DP_datas = bank_details.get("SL_DP_Data");
-		if(SL_DP_datas.size() > 0)
+		sl_dp_list = bank_details.get("SL_DP_Data");
+		if(sl_dp_list.size() > 0)
 		{
-			for each  sl_dps in SL_DP_datas
+			for each  sl_dp_item in sl_dp_list
 			{
 				//added by Prathiba
-				if(isNull(sl_dps.get("Transaction_ID")))
+				if(isNull(sl_dp_item.get("Transaction_ID")))
 				{
-					if(isNull(sl_dps.get("Name_of_the_Bank")))
+					if(isNull(sl_dp_item.get("Name_of_the_Bank")))
 					{
 						return "Kindly select 'Name of the Bank' in Account Details";
 					}
 					// the bank details of this row are read below, one query per row, when the new Perfios request is built
 				}
 				//end by Prathiba
-				info instituition_List;
-				if(sl_dps.get("Type_of_Account") == "OD" || sl_dps.get("Type_of_Account") == "CC")
+				if(sl_dp_item.get("Type_of_Account") == "OD" || sl_dp_item.get("Type_of_Account") == "CC")
 				{
 					field_api_names = {"Sanction_Limit_OD_CC_Month","Drawing_Power_OD_CC_Month"};
 					loan_id = ifnull(ifnull(bank_details.getJSON("Loan_Application"),Map()).getJSON("id"),"");
 					business_details = zoho.crm.getRecordById("Accounts",loan_id);
 					if(business_details.get("Banking_Requirement_Type") == "With ABB Prime")
 					{
-						iterations = {1,2,3,4,5,6,7,8,9,10,11,12,13};
+						month_numbers = {1,2,3,4,5,6,7,8,9,10,11,12,13};
 					}
 					else if(loan_type.equalsIgnoreCase("Professional Loan") && business_details.get("Month_Bank_Statement_Requirement") == "Yes")
 					{
-						iterations = {1,2,3,4,5,6,7,8,9,10,11,12,13};
+						month_numbers = {1,2,3,4,5,6,7,8,9,10,11,12,13};
 					}
 					else
 					{
-						iterations = {1,2,3,4,5,6};
+						month_numbers = {1,2,3,4,5,6};
 					}
 					for each  field in field_api_names
 					{
-						info field;
-						for each  i in iterations
+						for each  month_no in month_numbers
 						{
 							if(field == "Sanction_Limit_OD_CC_Month")
 							{
-								if(!matches(sl_dps.get(field + i),"[0-9]+\\.[0-9]+") && !matches(sl_dps.get(field + i),"[0-9]+") && !matches(sl_dps.get(field + i),"-[0-9]+"))
+								if(!matches(sl_dp_item.get(field + month_no),"[0-9]+\\.[0-9]+") && !matches(sl_dp_item.get(field + month_no),"[0-9]+") && !matches(sl_dp_item.get(field + month_no),"-[0-9]+"))
 								{
-									info "";
 									return "Sanction Limit cannot have alphabets or special characters.";
 								}
-								if(sl_dps.get(field + i) < 0)
+								if(sl_dp_item.get(field + month_no) < 0)
 								{
-									info sl_dps.get(field + i);
-									info "check 1";
 									return "Sanction Limit cannot be a Negative Value.";
 								}
 							}
 							else
 							{
-								if(!matches(sl_dps.get(field + i),"[0-9]+\\.[0-9]+") && !matches(sl_dps.get(field + i),"[0-9]+") && !matches(sl_dps.get(field + i),"-[0-9]+"))
+								if(!matches(sl_dp_item.get(field + month_no),"[0-9]+\\.[0-9]+") && !matches(sl_dp_item.get(field + month_no),"[0-9]+") && !matches(sl_dp_item.get(field + month_no),"-[0-9]+"))
 								{
 									return "Drawing Power cannot have alphabets or special characters.";
 								}
-								if(sl_dps.get(field + i) < 0)
+								if(sl_dp_item.get(field + month_no) < 0)
 								{
-									info "check 2";
 									return "Drawing Power cannot be a Negative Value.";
 								}
 							}
@@ -97,37 +100,42 @@ try
 	{
 		info e + "SL/DP Vaildation check error";
 	}
+
+	// =====================================================================
+	// 3. APPLICANT AND MOBILE NUMBER
+	// =====================================================================
 	//perfios cr
 	loan_id = ifnull(ifnull(bank_details.getJSON("Loan_Application"),Map()).getJSON("id"),"");
 	app_id = ifnull(ifnull(bank_details.getJSON("Applicant"),Map()).getJSON("id"),"");
-	info app_id;
-	app = zoho.crm.getRecordById("Contacts",app_id);
-	app_no = app.get("LAN_NO");
+	applicant = zoho.crm.getRecordById("Contacts",app_id);
 	//Added By Alan to get Mobile No Start
-	mobileno = "";
-	constitution = app.get("Constitution_Type");
+	sms_mobile_no = "";
+	constitution = applicant.get("Constitution_Type");
 	if(constitution = "Limited Liability Partnership" || constitution = "OPC - One Person Company" || constitution = "Partnership" || constitution = "Private Ltd" || constitution = "Public Ltd")
 	{
-		mobileno = ifnull(app.get("Key_Person_Mobile_Number"),"");
+		sms_mobile_no = ifnull(applicant.get("Key_Person_Mobile_Number"),"");
 	}
 	else
 	{
-		mobileno = ifnull(app.get("Primary_Applicant_Phone"),"");
+		sms_mobile_no = ifnull(applicant.get("Primary_Applicant_Phone"),"");
 	}
-	info mobileno;
 	//Added By Alan to get Mobile No End
-	l_data = Map();
-	try 
+
+	// =====================================================================
+	// 4. SAVE THE BANK DETAILS RECORD STATUS ON THE CONTACT
+	// =====================================================================
+	status_update_log = Map();
+	try
 	{
-		bank_rec_status = ifnull(app.getJSON("Bank_Details_Record_Status"),0);
+		bank_rec_status = ifnull(applicant.getJSON("Bank_Details_Record_Status"),0);
 		if(bank_rec_status.toLong() != 2)
 		{
-			ump = Map();
-			ump.put("Bank_Details_Record_ID",id);
-			ump.put("Bank_Details_Record_Status",1);
-			l_data.put("ump_map",ump);
-			upresp = zoho.crm.updateRecord("Contacts",app_id,ump);
-			l_data.put("upresp_value",upresp);
+			status_update = Map();
+			status_update.put("Bank_Details_Record_ID",id);
+			status_update.put("Bank_Details_Record_Status",1);
+			status_update_log.put("ump_map",status_update);
+			status_update_resp = zoho.crm.updateRecord("Contacts",app_id,status_update);
+			status_update_log.put("upresp_value",status_update_resp);
 		}
 	}
 	catch (error)
@@ -139,7 +147,7 @@ try
 		log_data.put("Loan_Application",loan_id);
 		log_data.put("Id_of_Record",id);
 		log_data.put("API","Function Error - 'Perfios_link'");
-		log_data.put("Response",l_data.toString());
+		log_data.put("Response",status_update_log.toString());
 		log_data.put("Request",error.toString());
 		zoho.crm.createRecord("Logger",log_data);
 		emp = Map();
@@ -147,308 +155,126 @@ try
 		emp.put("error_message",error.toString());
 		emp.put("action_performed","Perfios_link > records updating.");
 		info emp;
-		info standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
+		standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
 	}
-	// try{
-	url = "";
+
+	// =====================================================================
+	// 5. FIND THE BANK ROW TO PROCESS (status Pending / Link Generated / empty)
+	// =====================================================================
+	perfios_link = "";
 	search = false;
 	subform_id = "";
-	lead_id = bank_details.get("Name");
 	if(app_id.toString().len() > 0)
 	{
 		appli_details = zoho.crm.getRecordById("Contacts",id);
 		if(ifnull(appli_details.getJSON("Bank_Details_Record_Status"),"").toString().len() > 0)
 		{
-			info zoho.crm.updateRecord("Contacts",app_id,{"Bank_Details_Record_Status":1});
+			zoho.crm.updateRecord("Contacts",app_id,{"Bank_Details_Record_Status":1});
 		}
 	}
-	loan_type = bank_details.get("Loan_Type");
 	app_no = bank_details.get("Name");
-	additional = bank_details.get("Additional_banks_details");
-	banks = bank_details.get("Bank_account").size();
-	loan = zoho.crm.getRecordById("Accounts",loan_id);
-	info zoho.crm.updateRecord("Bank_Details",id,{"Perfios_online":true,"Bank_Record_ID":id,"Name":app_no});
-	info additional.size();
-	acc_type = "";
+	additional_banks = bank_details.get("Additional_banks_details");
+	bank_account_count = bank_details.get("Bank_account").size();
+	loan_record = zoho.crm.getRecordById("Accounts",loan_id);
+	zoho.crm.updateRecord("Bank_Details",id,{"Perfios_online":true,"Bank_Record_ID":id,"Name":app_no});
 	s_no = 1;
-	if(additional.size() > 0)
+	if(additional_banks.size() > 0)
 	{
-		if(additional.get(0).get("Where_would_you_want_to_upload_bank_statements") != "" && additional.get(0).get("Where_would_you_want_to_upload_bank_statements") != null)
+		if(additional_banks.get(0).get("Where_would_you_want_to_upload_bank_statements") != "" && additional_banks.get(0).get("Where_would_you_want_to_upload_bank_statements") != null)
 		{
-			where = "";
-			for each  i in additional
+			upload_mode = "";
+			for each  row in additional_banks
 			{
-				info i;
-				info i.get("Account_Type");
-				// 				if(i.get("Account_Type") != null && i.get("Account_Type") != "")
-				// 				{
-				if(ifnull(i.get("Status"),"").equalsIgnoreCase("Pending") || ifnull(i.get("Status"),"").equalsIgnoreCase("Link Generated") || i.get("Status") == null)
+				if(ifnull(row.get("Status"),"").equalsIgnoreCase("Pending") || ifnull(row.get("Status"),"").equalsIgnoreCase("Link Generated") || row.get("Status") == null)
 				{
-					where = i.get("Where_would_you_want_to_upload_bank_statements");
-					subform_id = i.get("id");
-					s_no = ifnull(i.get("LinkingModule52_Serial_Number"),1);
-					acc_type = i.get("Account_Type");
+					upload_mode = row.get("Where_would_you_want_to_upload_bank_statements");
+					subform_id = row.get("id");
+					s_no = ifnull(row.get("LinkingModule52_Serial_Number"),1);
 					//search and if yes use same link else new
-					bank_type = "additional";
 					search = true;
 					break;
 				}
-				// 				}
-				// 				else
-				// 				{
-				// 					return "Please enter the Account type to proceed";
-				// 					break;
-				// 				}
 			}
 		}
 	}
 	if(subform_id == "")
 	{
-		info "add row to add additional";
 		return "Please add account type and where to upload details to proceed";
 	}
 	else
 	{
+		// =====================================================================
+		// 6. APPLICANT TYPE DETAILS (constitution, PAN, mobile)
+		// =====================================================================
 		//url is empty generate new
 		search = true;
-		employment_loan = "";
 		constitution = "";
-		if(app.get("Applicants_Type").equalsIgnoreCase("Applicant"))
+		if(applicant.get("Applicants_Type").equalsIgnoreCase("Applicant"))
 		{
-			employment_loan = app.get("Applicant_Employment_Type");
-			constitution = app.get("Constitution_Type");
-			// 		 jagatheees -CTLZ-76214  start
-			pan_number = ifnull(app.get("Applicant_PAN_No"),"");
-			//date_of_birth = ifnull(app.get("Date_of_Birth"),app.get("Date_of_Incorporation_Inception"));
-			if(app.get("Primary_Applicant_Phone").length() > 10)
+			constitution = applicant.get("Constitution_Type");
+			// jagatheees -CTLZ-76214 start
+			pan_number = ifnull(applicant.get("Applicant_PAN_No"),"");
+			if(applicant.get("Primary_Applicant_Phone").length() > 10)
 			{
-				mobileNumber = ifnull(app.get("Primary_Applicant_Phone").subString(3,13),"");
+				perfios_mobile_no = ifnull(applicant.get("Primary_Applicant_Phone").subString(3,13),"");
 			}
 			else
 			{
-				mobileNumber = ifnull(app.get("Primary_Applicant_Phone"),"");
+				perfios_mobile_no = ifnull(applicant.get("Primary_Applicant_Phone"),"");
 			}
-			// 		 jagatheees -CTLZ-76214  end
+			// jagatheees -CTLZ-76214 end
 		}
-		else if(app.get("Applicants_Type").equalsIgnoreCase("co-applicant"))
+		else if(applicant.get("Applicants_Type").equalsIgnoreCase("co-applicant"))
 		{
-			employment_loan = app.get("Co_Applicant_Employment_Type");
-			constitution = app.get("Co_Applicant_Constitution_Type");
-			// 		 jagatheees -CTLZ-76214  start
-			pan_number = ifnull(app.get("Co_App_PAN_No"),"");
-			//date_of_birth = ifnull(app.get("Co_App_Date_of_Birth"),app.get("Date_of_Incorporation_Inception"));
-			// 			mobileNumber =ifnull(app.get("Mobile_No").toString().replaceAll("+91", ""),"");
-			if(app.get("Mobile_No").length() > 10)
+			constitution = applicant.get("Co_Applicant_Constitution_Type");
+			// jagatheees -CTLZ-76214 start
+			pan_number = ifnull(applicant.get("Co_App_PAN_No"),"");
+			if(applicant.get("Mobile_No").length() > 10)
 			{
-				mobileNumber = ifnull(app.get("Mobile_No").subString(3,13),"");
+				perfios_mobile_no = ifnull(applicant.get("Mobile_No").subString(3,13),"");
 			}
 			else
 			{
-				mobileNumber = ifnull(app.get("Mobile_No"),"");
+				perfios_mobile_no = ifnull(applicant.get("Mobile_No"),"");
 			}
-			// 		 jagatheees -CTLZ-76214  end
+			// jagatheees -CTLZ-76214 end
 		}
-		else if(app.get("Applicants_Type").equalsIgnoreCase("Guarantor"))
+		else if(applicant.get("Applicants_Type").equalsIgnoreCase("Guarantor"))
 		{
-			employment_loan = app.get("Guarantor_Employment_Type");
-			constitution = app.get("Guarantor_Constitution_Type");
+			constitution = applicant.get("Guarantor_Constitution_Type");
 		}
-		// 	if(loan_type.equalsIgnoreCase("Personal Loan"))
-		// 	{
-		// 		if(employment_loan == "Salaried")
-		// 		{
-		// 			if(!acc_type.equalsIgnoreCase("Savings") && !acc_type.equalsIgnoreCase("OD"))
-		// 			{
-		// 				return "Account type is not acceptable account, only Savings,OD account types allowed";
-		// 			}
-		// 		}
-		// 		else
-		// 		{
-		// 			if(!acc_type.equalsIgnoreCase("Savings")&& !acc_type.equalsIgnoreCase("OD")){
-		// 			}
-		// 		}
-		// 	}
-		// 	else if(loan_type.equalsIgnoreCase("Professional Loan"))
-		// 	{
-		// 		if(acc_type.equalsIgnoreCase("Savings")&& acc_type.equalsIgnoreCase("OD")){
-		// 			}
-		// 	}
-		// 	else if(loan_type.equalsIgnoreCase("Business Loan"))
-		// 	{
-		// 		if(constitution != null)
-		// 		{
-		// 			if(!ifnull(constitution,"").equalsIgnoreCase("Sole Proprietor"))
-		// 			{
-		// 				if(acc_type.equalsIgnoreCase("Savings"))
-		// 				{
-		// 					return "Account type is not acceptable account, only Current,OD,CC account types allowed";
-		// 				}
-		// 			}
-		// 		}
-		// 	}
-		info "generate link";
 	}
+
+	// =====================================================================
+	// 7. REUSE THE EXISTING PERFIOS LINK, OR EXPIRE IT
+	// =====================================================================
 	//swathi start
-	// 	if(search)
-	// 	{
-	// 		query = "select Perfios_Link,Perfios_Status from Logger where ((((API='Perfios Generate Link' and API_Call_Status='Success') and Applicant_ID='" + app_id + "') and Loan_Application_ID='" + loan_id + "') and Link_Status='Completed') order by Created_Time desc limit 0,1";
-	// 		queryMap = Map();
-	// 		queryMap.put("select_query",query);
-	// 		// info query;
-	// 		resp = invokeurl
-	// 		[
-	// 			url :"https://www.zohoapis.in/crm/v8/coql"
-	// 			type :POST
-	// 			parameters:queryMap.toString()
-	// 			connection:"zohocrmall"
-	// 		];
-	// 		info resp;
-	// 		if(resp != "")
-	// 		{
-	// 			for each  i in resp.get("data")
-	// 			{
-	// 				try 
-	// 				{
-	// 					if(i.get("Perfios_Status") == "Pending")
-	// 					{
-	// 						return "Please Fetch Bank Statement Details for recevied callback";
-	// 					}
-	// 				}
-	// 				catch (e)
-	// 				{
-	// 					info "catch in Perfios_Status :" + e;
-	// 					emp = Map();
-	// 					emp.put("details",dmp);
-	// 					emp.put("error_message",e.toString());
-	// 					emp.put("action_performed","Perfios_link > Condition based records checking.");
-	// 					info emp;
-	// 					info standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
-	// 				}
-	// 			}
-	// 		}
-	// 	}
-	// 	if(search)
-	// 	{
-	// 		query = "select Perfios_Link,Perfios_Status,Perfios_Expiry_Date,Link_Status from Logger where ((((API='Perfios Generate Link' and API_Call_Status='Success') and Applicant_ID='" + app_id + "') and Loan_Application_ID='" + loan_id + "') and Link_Status='Pending') order by Created_Time desc limit 0,1";
-	// 		queryMap = Map();
-	// 		queryMap.put("select_query",query);
-	// 		// info query;
-	// 		resp = invokeurl
-	// 		[
-	// 			url :"https://www.zohoapis.in/crm/v8/coql"
-	// 			type :POST
-	// 			parameters:queryMap.toString()
-	// 			connection:"zohocrmall"
-	// 		];
-	// 		info resp;
-	// 		expiryDate = "";
-	// 		if(resp != "")
-	// 		{
-	// 			for each  i in resp.get("data")
-	// 			{
-	// 				//Code added by Prathiba for CTLZ-32945
-	// 				if(i.get("Perfios_Status") == "Pending" && i.get("Perfios_Expiry_Date") != "")
-	// 				{
-	// 					expiryDate = i.get("Perfios_Expiry_Date").toDate();
-	// 					currentDate = zoho.currenttime;
-	// 					numberofdays = daysBetween(currentDate,expiryDate);
-	// 					numberofdays = daysBetween(currentDate,expiryDate);
-	// 					info numberofdays;
-	// 					if(numberofdays > 0)
-	// 					{
-	// 						info "if";
-	// 						expirystatus = "Not Expired";
-	// 						// 						// Sivaranjani added
-	// 						// 						return "Please Fetch Bank Statement Details for recevied callback";
-	// 						// 						// 						Sivaranjani ended
-	// 					}
-	// 					else
-	// 					{
-	// 						info "else";
-	// 						expirystatus = "Expired";
-	// 					}
-	// 					info i.get("Link_Status");
-	// 					if(expirystatus == "Expired")
-	// 					{
-	// 						info zoho.crm.updateRecord("Logger",i.get("id"),{"Perfios_Status":"Failed"});
-	// 						info zoho.crm.updateRecord("Logger",i.get("id"),{"Link_Status":"Failed"});
-	// 					}
-	// 					else
-	// 					{
-	// 						url = i.get("Perfios_Link");
-	// 						info url;
-	// 					}
-	// 					//Prathiba code ends for CTLZ-32945
-	// 				}
-	// 				else
-	// 				{
-	// 					url = i.get("Perfios_Link");
-	// 					info url;
-	// 				}
-	// 				// 		openUrl(url,"new window");
-	// 			}
-	// 			//Code added by Prathiba for CTLZ-32945
-	// 			if(expirystatus == "Expired")
-	// 			{
-	// 				info subform_id;
-	// 				for each  k in additional
-	// 				{
-	// 					if(k.get("id") == subform_id)
-	// 					{
-	// 						k.put("Status","Failed");
-	// 					}
-	// 				}
-	// 				info "additional Prathi" + additional;
-	// 				info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false});
-	// 			}
-	// 			//Prathiba Code ends for CTLZ-32945
-	// 			else if(subform_id != "")
-	// 			{
-	// 				info subform_id;
-	// 				for each  k in additional
-	// 				{
-	// 					if(k.get("id") == subform_id)
-	// 					{
-	// 						k.put("Status","Link Generated");
-	// 					}
-	// 				}
-	// 				info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false});
-	// 				//Prathiba code starts for CTLZ-32945
-	// 				info zoho.crm.updateRecord("Logger",i.get("id"),{"Perfios_Status":"Pending"});
-	// 				//Prathiba code ends for CTLZ-32945
-	// 			}
-	// 		}
-	// 	}
 	if(search)
 	{
 		// Single query to fetch latest Completed or Pending link
-		query = "select id,Perfios_Link,Perfios_Status,Perfios_Expiry_Date,Link_Status from Logger where ((((API='Perfios Generate Link' and API_Call_Status='Success') and Applicant_ID='" + app_id + "') and Loan_Application_ID='" + loan_id + "') and (Link_Status='Completed' or Link_Status='Pending')) order by Created_Time desc limit 0,1";
-		queryMap = Map();
-		queryMap.put("select_query",query);
-		info query;
-		resp = invokeurl
+		link_query = "select id,Perfios_Link,Perfios_Status,Perfios_Expiry_Date,Link_Status from Logger where ((((API='Perfios Generate Link' and API_Call_Status='Success') and Applicant_ID='" + app_id + "') and Loan_Application_ID='" + loan_id + "') and (Link_Status='Completed' or Link_Status='Pending')) order by Created_Time desc limit 0,1";
+		link_query_map = Map();
+		link_query_map.put("select_query",link_query);
+		link_search_resp = invokeurl
 		[
 			url :"https://www.zohoapis.in/crm/v8/coql"
 			type :POST
-			parameters:queryMap.toString()
+			parameters:link_query_map.toString()
 			connection:"zohocrmall"
 		];
-		info resp;
-		expiryDate = "";
-		expirystatus = "";
-		url = "";
-		if(resp != "" && resp.get("data") != null)
+		link_expiry_date = "";
+		expiry_status = "";
+		perfios_link = "";
+		if(link_search_resp != "" && link_search_resp.get("data") != null)
 		{
-			for each  i in resp.get("data")
+			for each  row in link_search_resp.get("data")
 			{
-				try 
+				try
 				{
-					// =========================
-					// COMPLETED LINK CHECK
-					// =========================
-					if(i.get("Link_Status") == "Completed")
+					// ---- Completed link check ----
+					if(row.get("Link_Status") == "Completed")
 					{
-						if(i.get("Perfios_Status") == "Pending")
+						if(row.get("Perfios_Status") == "Pending")
 						{
 							return "Please Fetch Bank Statement Details for recevied callback";
 						}
@@ -459,50 +285,39 @@ try
 					info e;
 				}
 			}
-			for each  i in resp.get("data")
+			for each  row in link_search_resp.get("data")
 			{
-				try 
+				try
 				{
-					// =========================
-					// PENDING LINK CHECK
-					// =========================
-					if(i.get("Link_Status") == "Pending")
+					// ---- Pending link check ----
+					if(row.get("Link_Status") == "Pending")
 					{
-						if(i.get("Perfios_Status") == "Pending" && i.get("Perfios_Expiry_Date") != "")
+						if(row.get("Perfios_Status") == "Pending" && row.get("Perfios_Expiry_Date") != "")
 						{
-							expiryDate = i.get("Perfios_Expiry_Date").toDate();
-							info expiryDate;
-							currentDate = zoho.currenttime;
-							info currentDate;
-							numberofdays = daysBetween(currentDate,expiryDate);
-							info numberofdays;
-							if(numberofdays > 0)
+							link_expiry_date = row.get("Perfios_Expiry_Date").toDate();
+							now_time = zoho.currenttime;
+							days_left = daysBetween(now_time,link_expiry_date);
+							if(days_left > 0)
 							{
-								info "if";
-								expirystatus = "Not Expired";
+								expiry_status = "Not Expired";
 							}
 							else
 							{
-								info "else";
-								expirystatus = "Expired";
+								expiry_status = "Expired";
 							}
-							info i.get("Link_Status");
-							info expirystatus;
-							if(expirystatus == "Expired")
+							if(expiry_status == "Expired")
 							{
-								info zoho.crm.updateRecord("Logger",i.get("id"),{"Perfios_Status":"Failed"});
-								info zoho.crm.updateRecord("Logger",i.get("id"),{"Link_Status":"Failed"});
+								zoho.crm.updateRecord("Logger",row.get("id"),{"Perfios_Status":"Failed"});
+								zoho.crm.updateRecord("Logger",row.get("id"),{"Link_Status":"Failed"});
 							}
 							else
 							{
-								url = i.get("Perfios_Link");
-								info url;
+								perfios_link = row.get("Perfios_Link");
 							}
 						}
 						else
 						{
-							url = i.get("Perfios_Link");
-							info url;
+							perfios_link = row.get("Perfios_Link");
 						}
 					}
 				}
@@ -514,83 +329,76 @@ try
 					emp.put("error_message",e.toString());
 					emp.put("action_performed","Perfios_link > Condition based records checking.");
 					info emp;
-					info standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
+					standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
 				}
 			}
-			// =========================
-			// UPDATE BANK DETAILS
-			// =========================
-			if(expirystatus == "Expired")
+			// ---- Update bank details ----
+			if(expiry_status == "Expired")
 			{
-				info subform_id;
-				for each  k in additional
+				for each  bank_row in additional_banks
 				{
-					if(k.get("id") == subform_id)
+					if(bank_row.get("id") == subform_id)
 					{
-						k.put("Status","Failed");
+						bank_row.put("Status","Failed");
 					}
 				}
-				info "additional Prathi" + additional;
-				info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false});
+				zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional_banks,"Bank_Details_Completed":false});
 			}
 			else if(subform_id != "")
 			{
-				info subform_id;
-				for each  k in additional
+				for each  bank_row in additional_banks
 				{
-					if(k.get("id") == subform_id)
+					if(bank_row.get("id") == subform_id)
 					{
-						k.put("Status","Link Generated");
+						bank_row.put("Status","Link Generated");
 					}
 				}
-				info "additional Prathi" + additional;
-				info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false});
-				info zoho.crm.updateRecord("Logger",i.get("id"),{"Perfios_Status":"Pending"});
+				zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional_banks,"Bank_Details_Completed":false});
+				zoho.crm.updateRecord("Logger",row.get("id"),{"Perfios_Status":"Pending"});
 			}
 		}
 	}
 	//swathi end
-	info "where-->" + where + "url:-->" + url;
-	if(!isNull(where) && isNull(url) && expirystatus != "Expired")
+
+	// =====================================================================
+	// 8. GENERATE A NEW PERFIOS LINK
+	// =====================================================================
+	if(!isNull(upload_mode) && isNull(perfios_link) && expiry_status != "Expired")
 	{
-		//bank_details = zoho.crm.getRecordById("Bank_Details",id);
-		//email_id = bank_details.get("Email_ID");
-		// 	where2 = bank_details.get("Where_would_you_want_to_upload_your_bankstatements");
-		// 	second_bank = bank_details.get("second_bank");
 		//perfios cr
-		SL_DP_data = bank_details.get("SL_DP_Data");
-		// ---- Bank details for the data sources: one query per bank row, like the live function
+		sl_dp_data = bank_details.get("SL_DP_Data");
+		// ---- Bank details for the data sources: one query per bank row, like the live function ----
 		// rows = every bank not processed yet + the bank of the row being processed now (s_no)
 		bank_not_found = false;
-		for each  sd in SL_DP_data
+		for each  sl_dp_lookup_row in sl_dp_data
 		{
-			if(isNull(sd.get("Transaction_ID")) || (sd.get("S_NO") == s_no && sd.get("Type") == "Perfios Online"))
+			if(isNull(sl_dp_lookup_row.get("Transaction_ID")) || (sl_dp_lookup_row.get("S_NO") == s_no && sl_dp_lookup_row.get("Type") == "Perfios Online"))
 			{
-				sd_bank = ifnull(sd.get("Name_of_the_Bank"),Map()).get("id");
-				if(isNull(sd_bank))
+				lookup_bank_id = ifnull(sl_dp_lookup_row.get("Name_of_the_Bank"),Map()).get("id");
+				if(isNull(lookup_bank_id))
 				{
 					bank_not_found = true;
 				}
 				else
 				{
-					bk_query = "select Institution_ID,Netbanking_Available,AA_Available,Statement_Available from Institution_ID_Master where (id='" + sd_bank + "')";
-					bk_query_map = Map();
-					bk_query_map.put("select_query",bk_query);
-					bk_resp = invokeurl
+					institution_query = "select Institution_ID,Netbanking_Available,AA_Available,Statement_Available from Institution_ID_Master where (id='" + lookup_bank_id + "')";
+					institution_query_map = Map();
+					institution_query_map.put("select_query",institution_query);
+					institution_resp = invokeurl
 					[
 						url :"https://www.zohoapis.in/crm/v8/coql"
 						type :POST
-						parameters:bk_query_map.toString()
+						parameters:institution_query_map.toString()
 						connection:"zohocrmall"
 					];
-					if(bk_resp != null && bk_resp != "" && bk_resp.get("data") != null && bk_resp.get("data").size() > 0)
+					if(institution_resp != null && institution_resp != "" && institution_resp.get("data") != null && institution_resp.get("data").size() > 0)
 					{
-						ins_det = Map();
-						ins_det.put("Instituition_id",bk_resp.get("data").get(0).get("Institution_ID"));
-						ins_det.put("Netbanking_Available",bk_resp.get("data").get(0).get("Netbanking_Available"));
-						ins_det.put("AA_Available",bk_resp.get("data").get(0).get("AA_Available"));
-						ins_det.put("Statement_Available",bk_resp.get("data").get(0).get("Statement_Available"));
-						instituition_List.add(ins_det);
+						institution_info = Map();
+						institution_info.put("Instituition_id",institution_resp.get("data").get(0).get("Institution_ID"));
+						institution_info.put("Netbanking_Available",institution_resp.get("data").get(0).get("Netbanking_Available"));
+						institution_info.put("AA_Available",institution_resp.get("data").get(0).get("AA_Available"));
+						institution_info.put("Statement_Available",institution_resp.get("data").get(0).get("Statement_Available"));
+						institution_list.add(institution_info);
 					}
 					else
 					{
@@ -604,47 +412,45 @@ try
 			return "Unable to read the bank details. Please try again.";
 		}
 		//perfios cr
+
+		// ---- Acceptance policy, employment type, statement duration, loan type ----
 		current_month = zoho.currentdate.getMonth();
 		current_year = zoho.currentdate.getYear();
-		info current_month;
 		duration_period = 0;
-		policy = "atLeastOneTransactionInRange";
-		app = zoho.crm.getRecordById("Contacts",app_id);
-		employment_loan = "";
-		info employment_loan = app.get("Applicant_Employment_Type");
-		if(app.get("Applicants_Type").equalsIgnoreCase("Applicant"))
+		acceptance_policy = "atLeastOneTransactionInRange";
+		applicant = zoho.crm.getRecordById("Contacts",app_id);
+		employment_type = "";
+		info employment_type = applicant.get("Applicant_Employment_Type");
+		if(applicant.get("Applicants_Type").equalsIgnoreCase("Applicant"))
 		{
-			employment_loan = app.get("Applicant_Employment_Type");
+			employment_type = applicant.get("Applicant_Employment_Type");
 		}
-		else if(app.get("Applicants_Type").equalsIgnoreCase("co-applicant"))
+		else if(applicant.get("Applicants_Type").equalsIgnoreCase("co-applicant"))
 		{
-			employment_loan = app.get("Co_Applicant_Employment_Type");
+			employment_type = applicant.get("Co_Applicant_Employment_Type");
 		}
-		else if(app.get("Applicants_Type").equalsIgnoreCase("Guarantor"))
+		else if(applicant.get("Applicants_Type").equalsIgnoreCase("Guarantor"))
 		{
-			employment_loan = app.get("Guarantor_Employment_Type");
+			employment_type = applicant.get("Guarantor_Employment_Type");
 		}
 		if(loan_type.equalsIgnoreCase("Personal Loan"))
 		{
-			if(employment_loan == "Salaried")
+			if(employment_type == "Salaried")
 			{
-				// 				Sivaranjani changed the acceptance policy for the PL SAL - 17/06/2025
-				policy = "atLeastOneTransactionInRange";
-				// 				policy = "atLeastOneTransactionPerMonthInRange";
+				// Sivaranjani changed the acceptance policy for the PL SAL - 17/06/2025
+				acceptance_policy = "atLeastOneTransactionInRange";
 				duration_period = zoho.crm.getOrgVariable("Perfios_duration_months_Salaried");
-				info "app.get" + app.get("Applicants_Type");
-				if(app.get("Applicants_Type").equalsIgnoreCase("Applicant"))
+				if(applicant.get("Applicants_Type").equalsIgnoreCase("Applicant"))
 				{
-					info "from loan app";
-					loan = zoho.crm.getRecordById("Accounts",loan_id);
-					employer_name = loan.get("Employer_Name");
+					loan_record = zoho.crm.getRecordById("Accounts",loan_id);
+					employer_name = loan_record.get("Employer_Name");
 					if(employer_name != null)
 					{
 						employer_name = employer_name.get("name");
 					}
 					else
 					{
-						employer_name = loan.get("Employer_s_Name");
+						employer_name = loan_record.get("Employer_s_Name");
 					}
 				}
 				else
@@ -699,13 +505,13 @@ try
 			}
 			loan_type = "BusinessLoan";
 		}
-		info current_month;
+
+		// ---- Statement period and required months ----
 		start_month = 0;
 		start_year = 0;
 		end_month = 0;
 		end_year = current_year;
 		start_month = current_month - duration_period.toNumber();
-		info start_month;
 		if(current_month == 1)
 		{
 			end_month = 12;
@@ -714,9 +520,8 @@ try
 		else
 		{
 			//Sivaranjani added code to add the current month - 17/06/2025
-			// Sandhya - code change 
+			// Sandhya - code change
 			end_month = current_month - 1;
-			// 			end_month = current_month;
 		}
 		if(start_month > 0)
 		{
@@ -736,81 +541,71 @@ try
 				}
 			}
 		}
-		info start_month;
 		if(start_month > 0 && start_month < 10)
 		{
 			start_month = "0" + start_month;
 		}
-		info start_year;
-		// 		// Sandhya - code change start
-		// 		if(end_month > 0 && end_month < 10)
-		// 		{
-		// 			end_month = "0" + end_month;
-		// 		}
+		// Sandhya - code change start
 		if(current_month > 0 && current_month < 10)
 		{
 			current_month = "0" + current_month;
 		}
 		// Sandhya - code change end
 		duration_start = start_year + "-" + start_month;
-		info duration_start;
-		// Sandhya - code change 
-		// 		duration_end = end_year + "-" + end_month;
+		// Sandhya - code change
 		duration_end = current_year + "-" + current_month;
-		info duration_end;
 		required_months = List();
 		month_map = {"1":"Jan","2":"Feb","3":"Mar","4":"Apr","5":"May","6":"Jun","7":"Jul","8":"Aug","9":"Sep","10":"Oct","11":"Nov","12":"Dec","01":"Jan","02":"Feb","03":"Mar","04":"Apr","05":"May","06":"Jun","07":"Jul","08":"Aug","09":"Sep"};
-		months = {12,11,10,9,8,7,6,5,4,3,2,1};
+		calendar_months = {12,11,10,9,8,7,6,5,4,3,2,1};
 		required_months.add(month_map.get(end_month.toString()) + "-" + end_year.subString(2));
 		if(start_month.toDecimal() < end_month.toDecimal())
 		{
-			for each  m in months
+			for each  calendar_month in calendar_months
 			{
-				if(m > start_month.toDecimal() && m < end_month.toDecimal())
+				if(calendar_month > start_month.toDecimal() && calendar_month < end_month.toDecimal())
 				{
-					required_months.add(month_map.get(m.toString()) + "-" + end_year.subString(2));
+					required_months.add(month_map.get(calendar_month.toString()) + "-" + end_year.subString(2));
 				}
 			}
 		}
 		else
 		{
-			info "else";
-			for each  m in months
+			for each  calendar_month in calendar_months
 			{
-				if(m >= 1 && m < end_month)
+				if(calendar_month >= 1 && calendar_month < end_month)
 				{
-					required_months.add(month_map.get(m.toString()) + "-" + end_year.subString(2));
+					required_months.add(month_map.get(calendar_month.toString()) + "-" + end_year.subString(2));
 				}
 			}
-			for each  m in months
+			for each  calendar_month in calendar_months
 			{
-				if(m > start_month && m <= 12)
+				if(calendar_month > start_month && calendar_month <= 12)
 				{
 					if(start_year != end_year)
 					{
-						required_months.add(month_map.get(m.toString()) + "-" + start_year.subString(2));
+						required_months.add(month_map.get(calendar_month.toString()) + "-" + start_year.subString(2));
 					}
 					else
 					{
-						required_months.add(month_map.get(m.toString()) + "-" + end_year.subString(2));
+						required_months.add(month_map.get(calendar_month.toString()) + "-" + end_year.subString(2));
 					}
 				}
 			}
 		}
 		required_months.add(month_map.get(start_month.toString()) + "-" + start_year.subString(2));
-		curr = zoho.currenttime;
-		curr = curr.substring(12);
-		curr = curr.replaceAll(":","");
-		info curr;
-		lead_id = bank_details.get("Name");
-		transaction_id = "CHOLA" + app_no + curr;
+
+		// ---- Transaction id and request headers ----
+		time_suffix = zoho.currenttime;
+		time_suffix = time_suffix.substring(12);
+		time_suffix = time_suffix.replaceAll(":","");
+		transaction_id = "CHOLA" + app_no + time_suffix;
 		header_data = Map();
 		header_data.put("X-SERVICE-NAME","ZohoCRM");
 		header_data.put("X-SERVICE-ORG","PASTE-UAT-ORG-ID"); // UAT: paste your test line (file 73ce7c35, line 787)
-		info header_data;
-		details = Map();
-		// 		details.put("transaction_id",transaction_id);
-		details.put("txnId",transaction_id);
+
+		// ---- Perfios request (perfios_request) ----
+		perfios_request = Map();
+		perfios_request.put("txnId",transaction_id);
 		if(employer_name != null && employer_name != "")
 		{
 			// Sivaranjani added for special charachter restriction  CTLZ -57049
@@ -819,87 +614,50 @@ try
 				employer_name = employer_name.replaceAll("[^a-zA-Z0-9 ]","");
 				employer_name = employer_name.replaceAll("\\s+"," ").trim();
 			}
-			info "Employer Name After" + employer_name;
 			// Sivaranjani ended
-			//Sivaranjani commented started
-			// 			if(ifnull(employer_name,"").contains("&"))
-			// 			{
-			// 				employer_name = employer_name.replaceAll("&","<<exc>[CDATA[<per>26]]>");
-			// 			}
-			// 			/*
-			// 			JIRA ID: CTLZ-28565
-			// 			Author : Prathiba Sivakumar
-			// 			Modified Date : 19/02/2025
-			// 			Description:To handle special characters in employer name in Perfios API
-			// 			*/
-			// 			if(ifnull(employer_name,"").contains("!"))
-			// 			{
-			// 				employer_name = employer_name.replaceAll("!","<<exc>[CDATA[<per>21]]>");
-			// 			}
-			// 			if(ifnull(employer_name,"").contains("#"))
-			// 			{
-			// 				employer_name = employer_name.replaceAll("#","<<exc>[CDATA[<per>23]]>");
-			// 			}
-			// 			if(ifnull(employer_name,"").contains("$"))
-			// 			{
-			// 				employer_name = employer_name.replaceAll("\\$","<<exc>[CDATA[<per>24]]>");
-			// 			}
-			// 			if(ifnull(employer_name,"").contains("-"))
-			// 			{
-			// 				employer_name = employer_name.replaceAll("-","<<exc>[CDATA[<per>2D]]>");
-			// 			}
-			// 			if(ifnull(employer_name,"").contains("%"))
-			// 			{
-			// 				employer_name = employer_name.replaceAll("%","<<exc>[CDATA[<per>25]]>");
-			// 			}
-			// 			//Prathiba Code ended.
-			// 			Sivaranjani comment ended
-			info employer_name;
-			details.put("employerName","employer_name");
+			perfios_request.put("employerName","employer_name");
 		}
 		else
 		{
-			details.put("employerName",null);
+			perfios_request.put("employerName",null);
 		}
 		//CTLZ-48279 Starts
 		if(loan_type.equalsIgnoreCase("Personal Loan") || loan_type.equalsIgnoreCase("PersonalLoan"))
 		{
-			if(employment_loan == "Salaried")
+			if(employment_type == "Salaried")
 			{
-				details.put("employmentType","Salaried");
+				perfios_request.put("employmentType","Salaried");
 			}
 		}
 		//CTLZ-48279 Ends
-		details.put("destination","choice-all");
-		details.put("loanAmount","2000000");
-		details.put("loanType",loan_type);
+		perfios_request.put("destination","choice-all");
+		perfios_request.put("loanAmount","2000000");
+		perfios_request.put("loanType",loan_type);
 		//Param Change for CTLZ-48410
-		details.put("loanDuration","60");
-		details.put("acceptancePolicy",policy);
-		// 				details.put("yearMonthFrom","2025-01");
-		// 				details.put("yearMonthTo","2025-04");
-		details.put("yearMonthFrom",duration_start);
-		details.put("yearMonthTo",duration_end);
-		details.put("productType","LOS1");
-		details.put("apiVersion",2.1);
-		details.put("vendorId","csel");
-		details.put("transactionCompleteCallbackUrl","PASTE-UAT-CALLBACK-URL"); // UAT: paste your test line (file ae571d74, line 28)
-		details.put("returnUrl","https://cifcl.in/ms.html");
-		details.put("facility","NONE");
-		// 		 jagatheees -CTLZ-76214  start
-		details.put("permanentAccountNumber",pan_number);
-		//details.put("dateOfBirth",date_of_birth);
-		details.put("mobileNumber",mobileNumber);
+		perfios_request.put("loanDuration","60");
+		perfios_request.put("acceptancePolicy",acceptance_policy);
+		perfios_request.put("yearMonthFrom",duration_start);
+		perfios_request.put("yearMonthTo",duration_end);
+		perfios_request.put("productType","LOS1");
+		perfios_request.put("apiVersion",2.1);
+		perfios_request.put("vendorId","csel");
+		perfios_request.put("transactionCompleteCallbackUrl","PASTE-UAT-CALLBACK-URL"); // UAT: paste your test line (file ae571d74, line 28)
+		perfios_request.put("returnUrl","https://cifcl.in/ms.html");
+		perfios_request.put("facility","NONE");
+		// jagatheees -CTLZ-76214 start
+		perfios_request.put("permanentAccountNumber",pan_number);
+		perfios_request.put("mobileNumber",perfios_mobile_no);
+
+		// ---- Data sources: Account Aggregator / Net Banking / Statement ----
 		//added by Prathiba
 		datasource = List();
 		institution_total_list = List();
-		if(instituition_List.size() > 0)
+		if(institution_list.size() > 0)
 		{
-			for each  ins in instituition_List
+			for each  institution in institution_list
 			{
-				info "For each " + ins.get("Instituition_id");
-				institution_total_list.add(ins.get("Instituition_id").toString());
-				details.put("institutionIds",{"institutionId":institution_total_list});
+				institution_total_list.add(institution.get("Instituition_id").toString());
+				perfios_request.put("institutionIds",{"institutionId":institution_total_list});
 				if(ifnull(constitution,"").equalsIgnoreCase(""))
 				{
 					aa_applicable = true;
@@ -908,24 +666,23 @@ try
 				{
 					aa_applicable = ifnull(constitution,"").equalsIgnoreCase("Sole Proprietor");
 				}
-				info aa_applicable;
 				if(!datasource.contains("ACCOUNT_AGGREGATOR") && aa_applicable && !novel_cancelled)
 				{
-					if(ifnull(ins.get("AA_Available"),"No").equalsIgnoreCase("Yes"))
+					if(ifnull(institution.get("AA_Available"),"No").equalsIgnoreCase("Yes"))
 					{
 						datasource.add("ACCOUNT_AGGREGATOR");
 					}
 				}
 				if(!datasource.contains("NETBANKING_FETCH"))
 				{
-					if(ifnull(ins.get("Netbanking_Available"),"No").equalsIgnoreCase("Yes"))
+					if(ifnull(institution.get("Netbanking_Available"),"No").equalsIgnoreCase("Yes"))
 					{
 						datasource.add("NETBANKING_FETCH");
 					}
 				}
 				if(!datasource.contains("STATEMENT"))
 				{
-					if(ifnull(ins.get("Statement_Available"),"No").equalsIgnoreCase("Yes"))
+					if(ifnull(institution.get("Statement_Available"),"No").equalsIgnoreCase("Yes"))
 					{
 						datasource.add("STATEMENT");
 					}
@@ -933,82 +690,83 @@ try
 			}
 			if(datasource.size() > 0)
 			{
-				details.put("dataSourcePriority",{"dataSource":datasource});
+				perfios_request.put("dataSourcePriority",{"dataSource":datasource});
 			}
 		}
 		info "Perfios data sources: " + datasource + " | banks: " + institution_total_list + " | Novel cancelled: " + novel_cancelled;
 		//end by Prathiba
-		info details;
+
+		// ---- OD / CC accounts: sanction limit and drawing power ----
 		final_list = List();
-		if(SL_DP_data.size() > 0)
+		if(sl_dp_data.size() > 0)
 		{
 			add_to_details = false;
-			for each  sl_dp in SL_DP_data
+			for each  sl_dp_row in sl_dp_data
 			{
 				sanction_limit = List();
 				drawing_power = List();
 				final_map = Map();
 				//perfios cr- scanned
-				if(sl_dp.get("S_NO") == s_no && sl_dp.get("Type") == "Perfios Online")
+				if(sl_dp_row.get("S_NO") == s_no && sl_dp_row.get("Type") == "Perfios Online")
 				{
-					if(sl_dp.get("Type_of_Account") == "OD" || sl_dp.get("Type_of_Account") == "CC")
+					if(sl_dp_row.get("Type_of_Account") == "OD" || sl_dp_row.get("Type_of_Account") == "CC")
 					{
 						field_api_names = {"Sanction_Limit_OD_CC_Month","Drawing_Power_OD_CC_Month"};
 						business_details = zoho.crm.getRecordById("Accounts",loan_id);
 						if(business_details.get("Banking_Requirement_Type") == "With ABB Prime")
 						{
-							iterations = {1,2,3,4,5,6,7,8,9,10,11,12,13};
+							month_numbers = {1,2,3,4,5,6,7,8,9,10,11,12,13};
 						}
 						else if(loan_type.equalsIgnoreCase("Professional Loan"))
 						{
 							if(business_details.get("Month_Bank_Statement_Requirement") == "Yes")
 							{
-								iterations = {1,2,3,4,5,6,7,8,9,10,11,12,13};
+								month_numbers = {1,2,3,4,5,6,7,8,9,10,11,12,13};
 							}
 							else
 							{
-								iterations = {1,2,3,4,5,6};
+								month_numbers = {1,2,3,4,5,6};
 							}
 						}
 						else
 						{
-							iterations = {1,2,3,4,5,6};
+							month_numbers = {1,2,3,4,5,6};
 						}
 						add_to_details = true;
 						for each  field in field_api_names
 						{
-							for each  i in iterations
+							for each  month_no in month_numbers
 							{
-								if(i <= duration_period.toNumber())
+								if(month_no <= duration_period.toNumber())
 								{
 									if(field == "Sanction_Limit_OD_CC_Month")
 									{
-										sanction_limit.add({"amount":ifnull(sl_dp.get(field + i),0)});
+										sanction_limit.add({"amount":ifnull(sl_dp_row.get(field + month_no),0)});
 									}
 									else
 									{
-										drawing_power.add({"amount":ifnull(sl_dp.get(field + i),0)});
+										drawing_power.add({"amount":ifnull(sl_dp_row.get(field + month_no),0)});
 									}
 								}
 							}
 						}
 						final_map.put("sanctionLimitFixed",false);
-						final_map.put("accountPattern",sl_dp.get("Bank_Account_Number"));
-						final_map.put("facility",sl_dp.get("Type_of_Account"));
+						final_map.put("accountPattern",sl_dp_row.get("Bank_Account_Number"));
+						final_map.put("facility",sl_dp_row.get("Type_of_Account"));
 						sanction_limit_reverse = List();
 						total_sl = sanction_limit.size() - 1;
-						for each index i in sanction_limit
+						for each index idx in sanction_limit
 						{
-							sanction_limit_reverse.add(sanction_limit.get(total_sl - i));
+							sanction_limit_reverse.add(sanction_limit.get(total_sl - idx));
 						}
 						drawing_power_reverse = List();
 						total_dp = drawing_power.size() - 1;
-						for each index i in drawing_power
+						for each index idx in drawing_power
 						{
-							drawing_power_reverse.add(drawing_power.get(total_dp - i));
+							drawing_power_reverse.add(drawing_power.get(total_dp - idx));
 						}
 						final_map.put("sanctionLimitVariableAmounts",{"variableAmount":sanction_limit_reverse});
-						if(sl_dp.get("Type_of_Account") == "CC")
+						if(sl_dp_row.get("Type_of_Account") == "CC")
 						{
 							final_map.put("drawingPowerVariableAmounts",{"variableAmount":drawing_power_reverse});
 						}
@@ -1018,9 +776,11 @@ try
 			}
 			if(add_to_details)
 			{
-				details.put("accounts",{"account":final_list});
+				perfios_request.put("accounts",{"account":final_list});
 			}
 		}
+
+		// ---- Self and sister company names ----
 		self_JSON = List();
 		sister_JSON = List();
 		self_string = "";
@@ -1028,88 +788,89 @@ try
 		line_break = "\n";
 		self_update = List();
 		sister_update = List();
-		for each  self in bank_details.get("Self_Names_JSON")
+		for each  self_name_row in bank_details.get("Self_Names_JSON")
 		{
-			self_JSON.add({"pattern":self.get("Self_Family_Name")});
-			self_string = self_string + self.get("S_No") + ". " + self.get("Self_Family_Name") + line_break;
-			self_update.add({"Self_Family_Name":self.get("Self_Family_Name"),"S_No":self.get("S_No")});
+			self_JSON.add({"pattern":self_name_row.get("Self_Family_Name")});
+			self_string = self_string + self_name_row.get("S_No") + ". " + self_name_row.get("Self_Family_Name") + line_break;
+			self_update.add({"Self_Family_Name":self_name_row.get("Self_Family_Name"),"S_No":self_name_row.get("S_No")});
 		}
-		for each  sister in bank_details.get("Sister_Names_JSON")
+		for each  sister_name_row in bank_details.get("Sister_Names_JSON")
 		{
-			sister_JSON.add({"pattern":sister.get("Sister_Group_Name")});
-			sister_string = sister_string + sister.get("S_No") + ". " + sister.get("Sister_Group_Name") + line_break;
-			sister_update.add({"Sister_Group_Name":sister.get("Sister_Group_Name"),"S_No":sister.get("S_No")});
+			sister_JSON.add({"pattern":sister_name_row.get("Sister_Group_Name")});
+			sister_string = sister_string + sister_name_row.get("S_No") + ". " + sister_name_row.get("Sister_Group_Name") + line_break;
+			sister_update.add({"Sister_Group_Name":sister_name_row.get("Sister_Group_Name"),"S_No":sister_name_row.get("S_No")});
 		}
 		self_before_xml = List();
 		self_count = 0;
 		mapping = Map();
-		for each  self_val in self_JSON
+		for each  self_item in self_JSON
 		{
 			self_before_xml.add({"pattern":"Self_" + self_count});
-			mapping.put("Self_" + self_count,self_val.get("pattern"));
+			mapping.put("Self_" + self_count,self_item.get("pattern"));
 			self_count = self_count + 1;
 		}
 		sister_before_xml = List();
 		sister_count = 0;
-		for each  sister_val in sister_JSON
+		for each  sister_item in sister_JSON
 		{
 			sister_before_xml.add({"pattern":"Sister_" + sister_count});
-			mapping.put("Sister_" + sister_count,sister_val.get("pattern"));
+			mapping.put("Sister_" + sister_count,sister_item.get("pattern"));
 			sister_count = sister_count + 1;
 		}
 		if(self_JSON.size() > 0)
 		{
-			details.put("companyNames",{"namePattern":self_before_xml});
+			perfios_request.put("companyNames",{"namePattern":self_before_xml});
 		}
 		if(sister_JSON.size() > 0)
 		{
-			details.put("sisterCompanyNames",{"namePattern":sister_before_xml});
+			perfios_request.put("sisterCompanyNames",{"namePattern":sister_before_xml});
 		}
-		for each  key in mapping.keys()
+
+		// ---- Replace special characters in the names ----
+		for each  placeholder_key in mapping.keys()
 		{
-			val = mapping.get(key);
-			// 	Jayadurgaa start 		
+			name_value = mapping.get(placeholder_key);
+			// Jayadurgaa start
 			// Remove null and trim spaces at beginning and end
-			val = ifnull(val,"").trim();
+			name_value = ifnull(name_value,"").trim();
 			// Replace multiple spaces inside the string with a single space
-			val = val.replaceAll("\\s+"," ");
-			// 	Jayadurgaa end
-			if(ifnull(val,"").contains("!"))
+			name_value = name_value.replaceAll("\\s+"," ");
+			// Jayadurgaa end
+			if(ifnull(name_value,"").contains("!"))
 			{
-				val = val.replaceAll("!","<<exc>[CDATA[<per>21]]>");
+				name_value = name_value.replaceAll("!","<<exc>[CDATA[<per>21]]>");
 			}
-			if(ifnull(val,"").contains("%"))
+			if(ifnull(name_value,"").contains("%"))
 			{
-				val = val.replaceAll("%","<<exc>[CDATA[<per>25]]>");
+				name_value = name_value.replaceAll("%","<<exc>[CDATA[<per>25]]>");
 			}
-			if(ifnull(val,"").contains("&"))
+			if(ifnull(name_value,"").contains("&"))
 			{
-				val = val.replaceAll("&","<<exc>[CDATA[<per>26]]>");
+				name_value = name_value.replaceAll("&","<<exc>[CDATA[<per>26]]>");
 			}
-			if(ifnull(val,"").contains("#"))
+			if(ifnull(name_value,"").contains("#"))
 			{
-				val = val.replaceAll("#","<<exc>[CDATA[<per>23]]>");
+				name_value = name_value.replaceAll("#","<<exc>[CDATA[<per>23]]>");
 			}
-			if(ifnull(val,"").contains("$"))
+			if(ifnull(name_value,"").contains("$"))
 			{
-				val = val.replaceAll("\\$","<<exc>[CDATA[<per>24]]>");
+				name_value = name_value.replaceAll("\\$","<<exc>[CDATA[<per>24]]>");
 			}
-			if(ifnull(val,"").contains("-"))
+			if(ifnull(name_value,"").contains("-"))
 			{
-				val = val.replaceAll("-","<<exc>[CDATA[<per>2D]]>");
+				name_value = name_value.replaceAll("-","<<exc>[CDATA[<per>2D]]>");
 			}
-			val = val.replaceAll("<exc>","!");
-			val = val.replaceAll("<per>","%");
-			if(val != mapping.get(key))
+			name_value = name_value.replaceAll("<exc>","!");
+			name_value = name_value.replaceAll("<per>","%");
+			if(name_value != mapping.get(placeholder_key))
 			{
-				mapping.put(key,val);
+				mapping.put(placeholder_key,name_value);
 			}
 		}
-		info "details===" + details;
-		perfios_xml = details.toXML();
-		info "perfios_xml===========" + perfios_xml;
+
+		// ---- Convert to XML and put the names back ----
+		perfios_xml = perfios_request.toXML();
 		perfios_xml = perfios_xml.replaceAll("root","payload");
-		info perfios_xml;
 		if(!isNull(employer_name))
 		{
 			employer_name = employer_name.replaceAll("<exc>","!");
@@ -1118,64 +879,55 @@ try
 		perfios_xml_copy = perfios_xml;
 		perfios_xml_copy = perfios_xml_copy.replaceAll("employer_name",employer_name);
 		perfios_xml = perfios_xml_copy;
-		// 		perfios_xml = perfios_xml.replaceAll("employer_name",employer_name);
 		self_count = 0;
-		for each  self_val in self_JSON
+		for each  self_item in self_JSON
 		{
 			perfios_xml_copy = perfios_xml;
 			if(perfios_xml_copy.contains("Self_" + self_count))
 			{
-				info "in";
-				info mapping.get("Self_" + self_count);
 				perfios_xml_copy = perfios_xml_copy.replaceAll("Self_" + self_count,mapping.get("Self_" + self_count));
-				info "perfios_xml - converted" + perfios_xml_copy;
 				perfios_xml = perfios_xml_copy;
 			}
 			self_count = self_count + 1;
 		}
-		info "perfios_xml - converted - self" + perfios_xml_copy;
-		info "mapping" + mapping;
 		sister_count = 0;
-		for each  sister_val in sister_JSON
+		for each  sister_item in sister_JSON
 		{
 			perfios_xml_copy = perfios_xml;
 			if(perfios_xml_copy.contains("Sister_" + sister_count))
 			{
-				info mapping.get("Sister_" + sister_count);
 				perfios_xml_copy = perfios_xml_copy.replaceAll("Sister_" + sister_count,mapping.get("Sister_" + sister_count));
-				info "perfios_xml - converted" + perfios_xml_copy;
 				perfios_xml = perfios_xml_copy;
 			}
 			sister_count = sister_count + 1;
 		}
-		info "perfios_xml - converted" + perfios_xml_copy;
-		details1 = Map();
-		details1.put("data_xml",perfios_xml_copy);
-		details1.put("transaction_id",transaction_id);
-		info details1;
-		execute = Map();
-		execute.put("consent_obtained",true);
-		execute.put("details",details1);
-		execute.put("webhook_url","PASTE-UAT-WEBHOOK-URL"); // UAT: paste your test line (file ae571d74, line 286)
-		//info execute;
-		lt = List();
-		lt.add("execution_path");
-		body = Map();
-		body.put("data",execute);
-		body.put("include",lt);
-		info body;
+
+		// ---- Bridge request ----
+		bridge_details = Map();
+		bridge_details.put("data_xml",perfios_xml_copy);
+		bridge_details.put("transaction_id",transaction_id);
+		bridge_data = Map();
+		bridge_data.put("consent_obtained",true);
+		bridge_data.put("details",bridge_details);
+		bridge_data.put("webhook_url","PASTE-UAT-WEBHOOK-URL"); // UAT: paste your test line (file ae571d74, line 286)
+		include_list = List();
+		include_list.add("execution_path");
+		bridge_body = Map();
+		bridge_body.put("data",bridge_data);
+		bridge_body.put("include",include_list);
+
+		// ---- Call generate_link and log the result ----
 		loggermap = Map();
 		loggermap.put("Request_Time",zoho.currenttime);
 		response = invokeurl
 		[
 			url :bfsi_bridge_domain + "/v1/features/INSIGHTS/actions/generate_link"
 			type :POST
-			parameters:body.toString()
+			parameters:bridge_body.toString()
 			headers:header_data
 			connection:"bfsibridgeusingoauth"
 			content-type:"application/json"
 		];
-		info "generate_link" + response;
 		loggermap.put("Response_Time",zoho.currenttime);
 		loggermap.put("API","Perfios Generate Link");
 		loggermap.put("Name","Perfios Generate Link");
@@ -1191,51 +943,45 @@ try
 		{
 			if(response.get("data").get("execution_status").equalsIgnoreCase("scheduled") || response.get("data").get("execution_status").equalsIgnoreCase("executed"))
 			{
-				xmlString = response.get("data").get("execution_path").get(0).get("response").get("response_body");
-				// xmlString = xmlString.replaceAll("<\\w+:","<").replaceAll("xmlns(:\\w+)?=\"[^\"]*\"","").replaceAll("</\\w+:","</");
-				// info xmlString;
-				url = xmlString.executeXPath("/Success/url");
-				url = url.remove("<url>");
-				url = url.remove("</url>");
-				expiry = xmlString.executeXPath("/Success/expires");
-				expiry = expiry.remove("<expires>");
-				expiry = expiry.remove("</expires>");
-				loggermap.put("Perfios_Link",url);
+				link_xml = response.get("data").get("execution_path").get(0).get("response").get("response_body");
+				perfios_link = link_xml.executeXPath("/Success/url");
+				perfios_link = perfios_link.remove("<url>");
+				perfios_link = perfios_link.remove("</url>");
+				perfios_expiry = link_xml.executeXPath("/Success/expires");
+				perfios_expiry = perfios_expiry.remove("<expires>");
+				perfios_expiry = perfios_expiry.remove("</expires>");
+				loggermap.put("Perfios_Link",perfios_link);
 				loggermap.put("Link_Status","Pending");
 				loggermap.put("Transaction_ID",transaction_id);
 				loggermap.put("API_Call_Status","Success");
-				loggermap.put("Perfios_Expiry_Date",expiry);
+				loggermap.put("Perfios_Expiry_Date",perfios_expiry);
 				loggermap.put("Time_Taken",(response.get("data").get("execution_path").get(0).get("time_taken") / 1000).toString() + " secs");
-				info url;
-				info subform_id;
-				s_no = 1;
 				s_no = 1;
 				if(subform_id != "")
 				{
-					info subform_id;
-					for each  k in additional
+					for each  bank_row in additional_banks
 					{
-						if(k.get("id") == subform_id)
+						if(bank_row.get("id") == subform_id)
 						{
-							k.put("Status","Link Generated");
-							k.put("Transaction_ID",transaction_id);
-							k.put("Self_Names_JSON",self_update);
-							k.put("Sister_Names_JSON",sister_update);
-							k.put("Self_Names",self_string);
-							k.put("Sister_Names",sister_string);
-							s_no = k.get("LinkingModule52_Serial_Number");
+							bank_row.put("Status","Link Generated");
+							bank_row.put("Transaction_ID",transaction_id);
+							bank_row.put("Self_Names_JSON",self_update);
+							bank_row.put("Sister_Names_JSON",sister_update);
+							bank_row.put("Self_Names",self_string);
+							bank_row.put("Sister_Names",sister_string);
+							s_no = bank_row.get("LinkingModule52_Serial_Number");
 						}
 					}
-					for each  s in SL_DP_data
+					for each  sl_dp_update_row in sl_dp_data
 					{
 						//perfios cr- scanned
-						if(s.get("S_NO") == s_no && s.get("Type") == "Perfios Online")
+						if(sl_dp_update_row.get("S_NO") == s_no && sl_dp_update_row.get("Type") == "Perfios Online")
 						{
-							s.put("Transaction_ID",transaction_id);
-							s.put("Duration_Months",required_months.toString());
+							sl_dp_update_row.put("Transaction_ID",transaction_id);
+							sl_dp_update_row.put("Duration_Months",required_months.toString());
 						}
 					}
-					info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false,"Show_Widget":false,"SL_DP_Data":SL_DP_data,"Hint_Message":""});
+					zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional_banks,"Bank_Details_Completed":false,"Show_Widget":false,"SL_DP_Data":sl_dp_data,"Hint_Message":""});
 				}
 			}
 		}
@@ -1243,42 +989,37 @@ try
 		{
 			loggermap.put("API_Call_Status","Failed");
 			loggermap.put("Response",response);
-			info zoho.crm.createRecord("Logger",loggermap);
+			zoho.crm.createRecord("Logger",loggermap);
 			return "Internal Server Error";
 		}
 		loggermap.put("Response",response);
-		info zoho.crm.createRecord("Logger",loggermap);
-		// }
+		zoho.crm.createRecord("Logger",loggermap);
 	}
-	// url=response.get("")
-	if(expirystatus == "Expired")
+
+	// =====================================================================
+	// 9. RETURN THE RESULT
+	// =====================================================================
+	if(expiry_status == "Expired")
 	{
 		return "The Perfios link has expired. Go to “Bank details section” and click on “Add row” button to add bank details. Then click on “Perform Perfios online” and user will be navigated to Perfios Portal";
 	}
-	else if(url != "" && url != null)
+	else if(perfios_link != "" && perfios_link != null)
 	{
-		if(where.equalsIgnoreCase("Send a link to customer's email ID"))
+		if(upload_mode.equalsIgnoreCase("Send a link to customer's email ID"))
 		{
-			/*sendmail
-			[
-				from :"noreply@chola.murugappa.com"
-				to :email_id
-				subject :"Upload bank statements"
-				message :"<html><body>Link for uploading statements: <a href=" + url + ">" + url + "</a></body></html>"
-			]*/
 			//Code by Alan for Send link to customer - Start
 			template_id = standalone.fetch_bridge_details("Email","Perfios_Link_Email","Template");
 			key_value = standalone.fetch_bridge_details("Email","Perfios_Link_Email","Key");
 			payload = Map();
 			payload.put("templateId",template_id);
 			payload.put("USER_NAME","CHOLA CSEL Traditional");
-			payload.put("PERFIOS_LINK",url);
+			payload.put("PERFIOS_LINK",perfios_link);
 			payload.put("subject","CIFCL Loan | Perfios Banking");
 			payload.put("NAME","Perfios");
 			payload.put("fromCode","NOREPLY");
-			toMailId = List();
-			toMailId.add(email_id);
-			payload.put("toMailId",toMailId);
+			to_mail_ids = List();
+			to_mail_ids.add(email_id);
+			payload.put("toMailId",to_mail_ids);
 			payload.put("keyId","123");
 			payload.put("userType","Email");
 			get_api_domain_wso2 = zoho.crm.getOrgVariable("Local_Onprem_WSO2");
@@ -1286,18 +1027,15 @@ try
 			header_data.put("Authorization",standalone.get_api_token(get_api_domain_wso2));
 			header_data.put("Content-Type","application/json");
 			header_data.put("x-email-key",key_value);
-			urlval = "https://" + get_api_domain_wso2 + ".chola.murugappa.com/bridgeemail/1.0.0/connection/api/email";
-			info payload;
-			info header_data;
+			api_url = "https://" + get_api_domain_wso2 + ".chola.murugappa.com/bridgeemail/1.0.0/connection/api/email";
 			response = invokeurl
 			[
-				url :urlval
+				url :api_url
 				type :POST
 				parameters:payload.toString()
 				headers:header_data
 				content-type:"application/json"
 			];
-			info response;
 			// Logging start
 			loggermap = Map();
 			loggermap.put("Response_Time",zoho.currenttime);
@@ -1310,34 +1048,31 @@ try
 			loggermap.put("Loan_Application",{"id":loan_id});
 			loggermap.put("Loan_Application_ID",loan_id);
 			loggermap.put("Application_Number",app_no);
-			//loggermap.put("API_triggered_user",{"id":userid});
 			// Parse response for IDs
-			executionStatus = false;
-			msgId = "";
+			msg_id = "";
 			request_id = "";
 			if(response.containsKey("status") && response.get("status") == true)
 			{
-				executionStatus = true;
-				dataMap = ifnull(response.get("data"),Map());
-				listMap = ifnull(dataMap.get("list"),Map());
-				request_id = ifnull(listMap.get("request_id"),"");
-				msgId = ifnull(listMap.get("msgId"),"");
+				data_map = ifnull(response.get("data"),Map());
+				list_map = ifnull(data_map.get("list"),Map());
+				request_id = ifnull(list_map.get("request_id"),"");
+				msg_id = ifnull(list_map.get("msgId"),"");
 				loggermap.put("API_Call_Status","Success");
 				loggermap.put("Email_OTP_Request_ID",request_id);
-				loggermap.put("Email_OTP_Message_ID",msgId);
+				loggermap.put("Email_OTP_Message_ID",msg_id);
 			}
 			else
 			{
 				loggermap.put("API_Call_Status","Failed");
 			}
-			info zoho.crm.createRecord("Logger",loggermap,{"trigger":{"workflow"}});
+			zoho.crm.createRecord("Logger",loggermap,{"trigger":{"workflow"}});
 			//SMS Code Starts
 			template_id = standalone.fetch_bridge_details("SMS","Perfios_Link_SMS","Template");
 			key_value = standalone.fetch_bridge_details("SMS","Perfios_Link_SMS","Key");
 			payload = Map();
 			payload.put("templateId",template_id);
-			payload.put("url",url);
-			payload.put("mobileNo",mobileno);
+			payload.put("url",perfios_link);
+			payload.put("mobileNo",sms_mobile_no);
 			payload.put("keyId","123");
 			payload.put("userType","SMS");
 			get_api_domain_wso2 = zoho.crm.getOrgVariable("Local_Onprem_WSO2");
@@ -1345,18 +1080,15 @@ try
 			header_data.put("Authorization",standalone.get_api_token(get_api_domain_wso2));
 			header_data.put("Content-Type","application/json");
 			header_data.put("x-sms-key",key_value);
-			urlval = "https://" + get_api_domain_wso2 + ".chola.murugappa.com/bridgesms/1.0.0/connection/sms";
-			info payload;
-			info header_data;
+			api_url = "https://" + get_api_domain_wso2 + ".chola.murugappa.com/bridgesms/1.0.0/connection/sms";
 			response = invokeurl
 			[
-				url :urlval
+				url :api_url
 				type :POST
 				parameters:payload.toString()
 				headers:header_data
 				content-type:"application/json"
 			];
-			info response;
 			// Logging start
 			loggermap = Map();
 			loggermap.put("Response_Time",zoho.currenttime);
@@ -1369,43 +1101,37 @@ try
 			loggermap.put("Loan_Application",{"id":loan_id});
 			loggermap.put("Loan_Application_ID",loan_id);
 			loggermap.put("Application_Number",app_no);
-			//loggermap.put("API_triggered_user",{"id":userid});
 			// Parse response for IDs
-			executionStatus = false;
-			msgId = "";
+			msg_id = "";
 			request_id = "";
 			if(response.containsKey("status") && response.get("status") == true)
 			{
-				executionStatus = true;
-				dataMap = ifnull(response.get("data"),Map());
-				listMap = ifnull(dataMap.get("list"),Map());
-				request_id = ifnull(listMap.get("result"),"");
-				msgId = ifnull(listMap.get("msgId"),"");
+				data_map = ifnull(response.get("data"),Map());
+				list_map = ifnull(data_map.get("list"),Map());
+				request_id = ifnull(list_map.get("result"),"");
+				msg_id = ifnull(list_map.get("msgId"),"");
 				loggermap.put("API_Call_Status","Success");
 				loggermap.put("Email_OTP_Request_ID",request_id);
-				loggermap.put("Email_OTP_Message_ID",msgId);
+				loggermap.put("Email_OTP_Message_ID",msg_id);
 			}
 			else
 			{
 				loggermap.put("API_Call_Status","Failed");
 			}
-			info zoho.crm.createRecord("Logger",loggermap,{"trigger":{"workflow"}});
+			zoho.crm.createRecord("Logger",loggermap,{"trigger":{"workflow"}});
 			//SMS Code Ends
 			//Code by Alan for Send link to customer - End
-			//return "Perfios link sent to customer's email ID!";
 			return "The Perfios link has been shared with the customer via email and SMS";
 		}
 		else
 		{
-			// 		url = "https://" + url;
-			// live button: openUrl(url,"new window"); - the parent opens the link from this return value
-			return "LINK:" + url;
+			// live button: openUrl(url,"new window"); - the parent opens the link from this return value (perfios_link)
+			return "LINK:" + perfios_link;
 		}
 	}
 	else
 	{
 		status_code = response.get("data").get("execution_path").get(0).get("response").get("status");
-		// 		status_code = "502";
 		if(status_code != "")
 		{
 			search_conf_modul = zoho.crm.searchRecords("Configuration_Module","(Name:equals:" + status_code + ")");
@@ -1422,7 +1148,6 @@ try
 		{
 			return "API Failed";
 		}
-		// 	return "API Failed";
 	}
 }
 catch (e)
@@ -1432,7 +1157,7 @@ catch (e)
 	emp.put("error_message",e.toString());
 	emp.put("action_performed","Perfios_link > Overall catch.");
 	info emp;
-	info standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
+	standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
 }
 return "";
 }
