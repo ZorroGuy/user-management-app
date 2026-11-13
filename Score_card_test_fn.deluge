@@ -1,19 +1,13 @@
 // ===== HARD STOP: bank Pending / Link Generated cannot go to the next page =====
     try {
-    
+
         if (target_screen.name === "Bank statement Details" || target_screen.api_name == "FSA" || target_screen.api_name == "GST_Transaction_Details") {
-            var hs_novel = ZDK.Page.getField("Novel_online");
-            var hs_online = ZDK.Page.getField("Perfios_online").getValue()
-                || ZDK.Page.getField("Netbanking_Scanned_API").getValue() === "Account Aggregator/Net-Banking/ePDF"
-                || (hs_novel != null && hs_novel.getValue());
             var hs_rows = ZDK.Page.getField("Additional_banks_details").getValue() || [];
-            if (hs_online) {
-                for (var hs_i = 0; hs_i < hs_rows.length; hs_i++) {
-                    if (hs_rows[hs_i].Status === "Pending" || hs_rows[hs_i].Status === "Link Generated") {
-                        ZDK.Client.hideLoader();
-                        ZDK.Client.showAlert("A bank is still Pending or Link Generated. Please click  Performe Bank / Fetch  before moving to the next page.");
-                        return false;
-                    }
+            for (var hs_i = 0; hs_i < hs_rows.length; hs_i++) {
+                if (hs_rows[hs_i].Status === "Pending" || hs_rows[hs_i].Status === "Link Generated") {
+                    ZDK.Client.hideLoader();
+                    ZDK.Client.showAlert("A bank is still Pending or Link Generated. Please click  Performe Bank / Fetch  before moving to the next page.");
+                    return false;
                 }
             }
         }
