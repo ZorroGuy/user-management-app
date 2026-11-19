@@ -480,7 +480,13 @@ const validatePerfiosResult = async (
             // return data1
             if (perfiosDataArr.includes('FRAUD')) {
               return 'FRAUD';
-            } else if (perfiosDataArr.includes('REFER')) {
+            } else if (perfiosDataArr.includes('Rejected')) {
+              return 'FRAUD';
+            }
+            else if (perfiosDataArr.includes('Processed')) {
+              return 'VERIFIED';
+            }
+            else if (perfiosDataArr.includes('REFER')) {
               return 'REFER';
             }
           }
@@ -496,8 +502,7 @@ const validatePerfiosResult = async (
           return 'FRAUD';
         } else if (perfiosData === 'REFER') {
           return 'REFER';
-        } else if (perfiosData === 'VERIFIED') {
-          console.log('Fraud identified in the perfios result');
+        } else if (perfiosData === 'VERIFIED' || perfiosData === "Processed") {
           return 'VERIFIED';
         }
       }
@@ -960,8 +965,12 @@ const getStatementDetails = async (accNo, stamentDetails) => {
         accNo === statemenData[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['accountNo']
       ) {
         var obj = {};
+        let statementStatus = statemenData?.[i]?.['$']?.['statementStatus'] || 'VERIFIED';
+
         obj['statementname'] = statemenData[i]['$']['fileName'];
-        obj['statementStatus'] = statemenData?.[i]?.['$']?.['statementStatus'] || 'VERIFIED';
+        if (statementStatus === 'Processed') statementStatus = 'VERIFIED';
+        else if (statementStatus === 'Rejected') statementStatus = 'FAILED';
+        obj['statementStatus'] = statementStatus;
         obj['email'] = statemenData[i]['CustomerInfo'][0]['$']['email'];
         obj['mobile'] = statemenData[i]['CustomerInfo'][0]['$']['mobile'];
         obj['pan'] = statemenData[i]['CustomerInfo'][0]['$']['pan'];
@@ -1013,10 +1022,7 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
           ];
         }
         let splitBankingresponseArr = [];
-        if (
-          perfiosResult['PIR:Data']?.['AccountAnalysis'] &&
-          Array.isArray(perfiosResult['PIR:Data']['AccountAnalysis'])
-        ) {
+        if (perfiosResult['PIR:Data']?.['AccountAnalysis'] && Array.isArray(perfiosResult['PIR:Data']['AccountAnalysis'])) {
           for (let j = 0; j < perfiosResult['PIR:Data']['AccountAnalysis'].length; j++) {
             // console.log(perfiosResult["PIR:Data"]["AccountAnalysis"][j], "Perfios result")
             let perfiosFilteredData =
