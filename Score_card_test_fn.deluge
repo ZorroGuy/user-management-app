@@ -459,31 +459,31 @@ const validatePerfiosResult = async (
         ) {
           let startDate =
             perfiosResult['PIR:Data']['Statementdetails'][0]['Statement'][i][
-              'StatementAccounts'
+            'StatementAccounts'
             ][0]['StatementAccount'][0]['$']['xnsStartDate'];
           if (
             perfiosAccountNo ===
             perfiosResult['PIR:Data']['Statementdetails'][0]['Statement'][i][
-              'StatementAccounts'
+            'StatementAccounts'
             ][0]['StatementAccount'][0]['$']['accountNo']
             // && Date.parse(new Date(startDate)) >= Date.parse(new Date(xnsStartDate))
             // && Date.parse(new Date(startDate)) <= Date.parse(new Date(xnsEndDate))
           ) {
             let data1 =
               perfiosResult['PIR:Data']?.['Statementdetails']?.[0]?.['Statement']?.[i]?.['$']?.[
-                'statementStatus'
+              'statementStatus'
               ] || 'VERIFIED';
+
+            if (data1 === 'Processed') {
+              data1 = perfiosResult['PIR:Data']['Statementdetails'][0]['Statement'][i]['$']['fraudStatus'] === 'Fraud' ? 'FRAUD' : 'VERIFIED';
+            }
 
             perfiosDataArr.push(data1);
             perfiosData = perfiosDataArr;
-            
             console.log(perfiosDataArr, 'perfiosDataArr');
             // return data1
             if (perfiosDataArr.includes('FRAUD')) {
               return 'FRAUD';
-            }
-            else if (perfiosDataArr.includes('Processed')) {
-              return 'VERIFIED';
             }
             else if (perfiosDataArr.includes('REFER')) {
               return 'REFER';
@@ -494,7 +494,7 @@ const validatePerfiosResult = async (
       } else {
         perfiosData =
           perfiosResult?.['PIR:Data']?.['Statementdetails']?.['Statement']?.['$']?.[
-            'statementStatus'
+          'statementStatus'
           ] || 'VERIFIED';
 
         if (perfiosData === 'FRAUD') {
@@ -508,7 +508,7 @@ const validatePerfiosResult = async (
     } else if (perfiosResult['PIR:Data']?.['Statementdetails']) {
       perfiosData =
         perfiosResult?.['PIR:Data']?.['Statementdetails']?.['Statement']?.['$']?.[
-          'statementStatus'
+        'statementStatus'
         ] || 'VERIFIED';
       console.log(perfiosData, 'perfiosDataResult');
       return perfiosData;
@@ -967,7 +967,7 @@ const getStatementDetails = async (accNo, stamentDetails) => {
         let statementStatus = statemenData?.[i]?.['$']?.['statementStatus'] || 'VERIFIED';
 
         obj['statementname'] = statemenData[i]['$']['fileName'];
-        if (statementStatus === 'Processed') statementStatus = 'VERIFIED';
+        if (statementStatus === 'Processed') statementStatus = statemenData[i]['$']['fraudStatus'] === 'Fraud' ? 'FRAUD' : 'VERIFIED';
         obj['statementStatus'] = statementStatus;
         obj['email'] = statemenData[i]['CustomerInfo'][0]['$']['email'];
         obj['mobile'] = statemenData[i]['CustomerInfo'][0]['$']['mobile'];
@@ -1005,6 +1005,8 @@ const checkStatementType = async (data) => {
 };
 
 export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline', dataHeader) => {
+
+  debugger;
   try {
     let perfiosResult = await modifiedperfiosResult(
       actualperfiosResult,
@@ -1027,9 +1029,9 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
           for (let j = 0; j < perfiosResult['PIR:Data']['AccountAnalysis'].length; j++) {
             // console.log(perfiosResult["PIR:Data"]["AccountAnalysis"][j], "Perfios result")
             let perfiosFilteredData =
-                perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'][0][
-                  'MonthlyDetail'
-                ],
+              perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'][0][
+              'MonthlyDetail'
+              ],
               perfiosAccountNo = perfiosResult['PIR:Data']['AccountAnalysis'][j]['$']['accountNo'],
               xnsStartDate = await getTxnStartDt(
                 perfiosAccountNo,
@@ -1046,11 +1048,11 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
               perfiosAccountNo
             );
             let consolidatedData = await getConsolidatedData(
-                perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
-                perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-                j,
-                monthDetails
-              ),
+              perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
+              perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
+              j,
+              monthDetails
+            ),
               rootTotalCredits = 0,
               rootCredits = 0,
               rootDebits = 0,
@@ -1076,9 +1078,9 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
               : '';
             obj['primaryHolder'] = perfiosResult['PIR:Data']?.['Statementdetails']
               ? await getAccHolderName(
-                  perfiosAccountNo,
-                  perfiosResult['PIR:Data']['Statementdetails']
-                )
+                perfiosAccountNo,
+                perfiosResult['PIR:Data']['Statementdetails']
+              )
               : perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['$']['name'];
             obj['accType'] = perfiosResult['PIR:Data']['AccountAnalysis'][j]['$']['accountType'];
             // obj["xnsStartDate"] = await getXnsStartDate(perfiosAccountNo, perfiosResult["PIR:Data"]["Xns"])
@@ -1087,11 +1089,11 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
             obj['xnsEndDate'] = monthDetails.endDate;
             obj['sanctionLimit'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Average'][0]['$'][
-                'snLimit'
+              'snLimit'
               ]; //monthlydetails
             obj['emiServiced'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Average'][0]['$'][
-                'totalEmiOrLoan'
+              'totalEmiOrLoan'
               ]; //monthlydetails
             obj['statementStatus'] = await validatePerfiosResult(
               perfiosResult,
@@ -1100,11 +1102,6 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
               monthDetails.startDate,
               monthDetails.endDate
             );
-            // obj['statementType'] = await checkStatementType(
-            //   perfiosResult['PIR:Data']['AdditionalSummaryInfo'][0]['SummaryInfo1'][0]['$'][
-            //     'source'
-            //   ]
-            // );
             obj['statementType'] = await checkStatementType(
               perfiosResult['PIR:Data']?.['AdditionalAccountInfo']?.[0]?.[`SummaryInfo${j + 1}`]?.[0]?.['SummaryInfoDetails']?.[0]?.['$']?.['source'] ||
               perfiosResult['PIR:Data']['AdditionalSummaryInfo'][0]['SummaryInfo1'][0]['$']['source']
@@ -1126,22 +1123,22 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
             );
             obj['inwardBounceCount'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'inwBounces'
+              'inwBounces'
               ];
             obj['inwardChqBounceCount'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'inwChqBounces'
+              'inwChqBounces'
               ];
             obj['outwardBounceCount'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'outwBounces'
+              'outwBounces'
               ];
             obj['outwardChqBounceCount'] = perfiosResult['PIR:Data']['AccountAnalysis'][0][
               'SummaryInfo'
             ][0]['Total'][0]['$']['outwChqBounces']
               ? perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-                  'outwChqBounces'
-                ]
+              'outwChqBounces'
+              ]
               : '';
             obj['totalCredits'] = rootTotalCredits.toString();
             obj['totalDebits'] = rootTotalDebits.toString();
@@ -1149,39 +1146,39 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
             obj['countCredits'] = rootCredits.toString();
             obj['totalEmi'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'totalEmiOrLoan'
+              'totalEmiOrLoan'
               ];
             obj['countEmi'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'emiOrLoans'
+              'emiOrLoans'
               ];
             obj['inwEmiBouncesCount6M'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'inwEMIBounces'
+              'inwEMIBounces'
               ];
             obj['drawingPower'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'dpLimit'
+              'dpLimit'
               ];
             obj['overDrawnDays'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'overdrawnDays'
+              'overdrawnDays'
               ];
             obj['penalCharges'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'penalCharges'
+              'penalCharges'
               ];
             obj['intrestServiceDelay'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'intPayDelay'
+              'intPayDelay'
               ];
             obj['chqDepositsCount'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'chqDeposits'
+              'chqDeposits'
               ];
             obj['chqIssuesCount'] =
               perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-                'chqIssues'
+              'chqIssues'
               ];
             obj['maxUtilization'] = await maxUtilization(
               perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
@@ -1227,11 +1224,11 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
             perfiosAccountNo
           );
           let consolidatedData = await getConsolidatedData(
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
-              perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-              j,
-              monthDetails
-            ),
+            perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
+            perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
+            j,
+            monthDetails
+          ),
             rootTotalCredits = 0,
             rootCredits = 0;
           consolidatedData.forEach((data) => {
@@ -1245,24 +1242,24 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
             : '';
           obj['primaryHolder'] = perfiosResult['PIR:Data']?.['Statementdetails']
             ? perfiosResult['PIR:Data']['Statementdetails']?.[0]['Statement']?.['CustomerInfo']?.[
-                '$'
-              ]?.['name']
+            '$'
+            ]?.['name']
             : perfiosResult['PIR:Data']['CustomerInfo']?.[0]['$']?.['name'];
           obj['accType'] = perfiosResult['PIR:Data']['AccountAnalysis'][0]['$']['accountType'];
           obj['accNo'] = perfiosResult['PIR:Data']['AccountAnalysis'][0]['$']['accountNo'];
           obj['sanctionLimit'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][0][
-              'snLimit'
+            'snLimit'
             ];
           obj['emiServiced'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][0][
-              'totalEmiOrLoan'
+            'totalEmiOrLoan'
             ];
           obj['statementStatus'] = await validatePerfiosResult(perfiosResult, 0);
           obj['averageSalaries'] = await minIncome_2(perfiosFilteredData, 'SALARIED');
           obj['averageBankBalance'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'balAvg'
+            'balAvg'
             ];
           obj['FCUstatus'] = perfiosResult['PIR:Data']['AccountAnalysis'][0]?.['FCUAnalysis']
             ? perfiosResult['PIR:Data']['AccountAnalysis'][0]?.['FCUAnalysis']
@@ -1276,68 +1273,68 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
           );
           obj['inwardBounceCount'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'inwBounces'
+            'inwBounces'
             ];
           obj['inwardChqBounceCount'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'inwChqBounces'
+            'inwChqBounces'
             ];
           obj['outwardBounceCount'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'outwBounces'
+            'outwBounces'
             ];
           obj['outwardChqBounceCount'] = perfiosResult['PIR:Data']['AccountAnalysis'][0][
             'SummaryInfo'
           ][0]['Total'][0]['$']['outwChqBounces']
             ? perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-                'outwChqBounces'
-              ]
+            'outwChqBounces'
+            ]
             : '';
           obj['totalCredits'] = rootTotalCredits.toString();
           obj['totalDebits'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'totalCredit'
+            'totalCredit'
             ];
           obj['countDebits'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'debits'
+            'debits'
             ];
           obj['countCredits'] = rootCredits.toString();
           obj['totalEmi'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'totalEmiOrLoan'
+            'totalEmiOrLoan'
             ];
           obj['countEmi'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'emiOrLoans'
+            'emiOrLoans'
             ];
           obj['inwEmiBouncesCount6M'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'inwEMIBounces'
+            'inwEMIBounces'
             ];
           obj['drawingPower'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'dpLimit'
+            'dpLimit'
             ];
           obj['overDrawnDays'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'overdrawnDays'
+            'overdrawnDays'
             ];
           obj['penalCharges'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'penalCharges'
+            'penalCharges'
             ];
           obj['intrestServiceDelay'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'intPayDelay'
+            'intPayDelay'
             ];
           obj['chqDepositsCount'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'chqDeposits'
+            'chqDeposits'
             ];
           obj['chqIssuesCount'] =
             perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'chqIssues'
+            'chqIssues'
             ];
           obj['maxUtilization'] = await maxUtilization(
             perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
@@ -1398,7 +1395,7 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
         console.log(typeof perfiosResult['PIR:Data']);
         let perfiosFilteredData =
           perfiosResult?.['PIR:Data']['AccountAnalysis']?.['MonthlyDetails']?.[0][
-            'MonthlyDetail'
+          'MonthlyDetail'
           ] || perfiosResult?.['PIR:Data']?.['MonthlyDetails']?.[0]?.['MonthlyDetail'];
         let obj = {};
         let monthDetails = await getMonthDetails(
@@ -1407,11 +1404,11 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
           perfiosAccountNo
         );
         let consolidatedData = await getConsolidatedData(
-            perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
-            perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-            j,
-            monthDetails
-          ),
+          perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
+          perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
+          j,
+          monthDetails
+        ),
           rootTotalCredits = 0,
           rootCredits = 0;
         consolidatedData.forEach((data) => {
@@ -1423,8 +1420,8 @@ export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline'
         // console.log(perfiosResult["PIR:Data"]?.["SummaryInfo"]?.[0], "skdjbf")
         obj['primaryHolder'] = perfiosResult['PIR:Data']?.hasOwnProperty('Statementdetails')
           ? perfiosResult['PIR:Data']['Statementdetails']?.[0]['Statement'][0]?.[
-              'CustomerInfo'
-            ][0]?.['$']?.['name']
+          'CustomerInfo'
+          ][0]?.['$']?.['name']
           : perfiosResult['PIR:Data']?.['StatementAccounts']?.[0]['$']?.['name'];
         obj['accType'] = perfiosResult['PIR:Data']?.['SummaryInfo']?.[0]['$']?.['accType'];
         obj['accNo'] = perfiosResult['PIR:Data']?.['SummaryInfo']?.[0]['$']?.['accNo'];
