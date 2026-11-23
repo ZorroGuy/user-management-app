@@ -1,1662 +1,1439 @@
-import { json, perfiosJson } from '../perfios.js';
-import { parseString } from 'xml2js';
-import fs from 'fs';
-import {
-  inwardBouncesMonth,
-  outwardBouncesMonth,
-  totalCreditMonth,
-  numberOfCreditMonth,
-  numberOfDebitsMonth,
-  inwardPercentMonth,
-  outwardPercentMonth,
-  totalZeroCreditMonth,
-  existingLoanObligationMonth,
-  avgbankBalMonth,
-  monthlyIncomeSalaryMonth,
-} from './perfiosConfig.js';
-import DmsService from '../services/DmsService.js';
-import moment from 'moment';
-import { xmlResponse } from './perfiosXml.js';
-
-const minIncome_2 = async (minIncomeData, cust_type) => {
-  let minIncomeSum = 0;
-  let minIncomeCount = 0;
-  let customer_type = cust_type === 'SALARIED' ? 'totalSalary' : 'balAvg'; // swaping tags based on the customer category
-  for (let i = 0; i < minIncomeData.length; i++) {
-    const now = new Date();
-    const then = new Date(minIncomeData[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    if (msBetweenDates <= monthlyIncomeSalaryMonth) {
-      // console.log(msBetweenDates, "msBetweenDates");
-      if (Math.floor(Number(minIncomeData[i]['$'][customer_type])) > 0) {
-        minIncomeCount = minIncomeCount + 1;
-        minIncomeSum = minIncomeSum + Math.floor(Number(minIncomeData[i]['$'][customer_type]));
-      }
-    }
-  }
-
-  if (minIncomeCount > 0) {
-    // console.log(minIncomeSum, minIncomeCount, "minIncomeData");
-    return Math.floor(minIncomeSum / 3).toString();
-  } else {
-    console.log(minIncomeCount, 'minIncomeCount is less than 1');
-    return 0;
-  }
-};
-
-const avgBankBalance_2 = async (avgBankBalanceData) => {
-  let avgBankBalanceSum = 0;
-  let avgBankBalanceCount = 0;
-  let monthlyDetailArrr = [];
-  for (let i = 0; i < avgBankBalanceData.length; i++) {
-    const now = new Date();
-    const then = new Date(avgBankBalanceData[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    if (msBetweenDates <= avgbankBalMonth) {
-      // console.log(msBetweenDates,"msBetweenDates")
-      if (Math.floor(Number(avgBankBalanceData[i]['$']['balAvg'])) > 0) {
-        avgBankBalanceCount = avgBankBalanceCount + 1;
-        avgBankBalanceSum =
-          avgBankBalanceSum + Math.floor(Number(avgBankBalanceData[i]['$']['balAvg']));
-      }
-    }
-  }
-
-  if (avgBankBalanceCount >= 4) {
-    console.log(avgBankBalanceCount, avgBankBalanceSum, 'avgBankBalanceCount');
-    return Math.floor(avgBankBalanceSum / avgBankBalanceCount);
-  } else {
-    console.log(avgBankBalanceCount, 'Bank Balance count is less than 4 months');
-    return 0;
-  }
-};
-
-const annualbankingcredits_2 = async (monthlyDetailsSegment, dataHeader) => {
-  let totalCreditSum = 0;
-  let monthlyDetailArrr = [];
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (!dataHeader?.abb_months) {
-      if (
-        msBetweenDates <= totalCreditMonth // total Credit Month
-      ) {
-        //   console.log(
-        //     Number(monthlyDetailsSegment[i]["$"]["totalCredit"]),
-        //     msBetweenDates
-        //   );
-        totalCreditSum = totalCreditSum + Number(monthlyDetailsSegment[i]['$']['totalCredit']);
-      }
-    } else {
-      if (
-        msBetweenDates <=
-        Number(dataHeader?.abb_months) - 1 // total Credit Month
-      ) {
-        console.log('credits', monthlyDetailsSegment[i]['$']['monthName'], msBetweenDates);
-        totalCreditSum = totalCreditSum + Number(monthlyDetailsSegment[i]['$']['totalCredit']);
-      }
-    }
-  }
-  console.log('totalCreditSum:', totalCreditSum);
-  return Math.floor(totalCreditSum).toString();
-};
-
-const inwardChequeBouncesCount_2 = async (monthlyDetailsSegment) => {
-  let monthlyDetailArrr = [];
-  let inwardBouncesCount = 0;
-
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    // console.log(monthlyDetailsSegment[i]["$"]["startDate"]);
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (msBetweenDates <= inwardBouncesMonth) {
-      //   console.log(i,msBetweenDates);
-      inwardBouncesCount = inwardBouncesCount + Number(monthlyDetailsSegment[i]['$']['inwBounces']);
-    }
-  }
-  console.log('inwardBouncesCount:', inwardBouncesCount);
-  return inwardBouncesCount;
-};
-
-const inwardPercentage_2 = async (monthlyDetailsSegment) => {
-  let monthlyDetailArrr = [];
-  let totalDebitsSum = 0;
-  let totalInwardBounces = 0;
-  let inwardPercentageResult = 0;
-  for (const a in monthlyDetailsSegment) {
-    // console.log(monthlyDetailsSegment[a], "test");
-    totalDebitsSum = totalDebitsSum + Number(monthlyDetailsSegment[a]['$']['debits']);
-    totalInwardBounces = totalInwardBounces + Number(monthlyDetailsSegment[a]['$']['inwBounces']);
-  }
-  console.log('totalDebitsSum:', totalDebitsSum, 'totalInwardBounces:', totalInwardBounces);
-
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (
-      msBetweenDates <= inwardPercentMonth &&
-      totalDebitsSum > 10 // Inward Cheque bounces month to be changed
-    ) {
-      //   console.log(totalDebitsSum, msBetweenDates);
-      inwardPercentageResult = totalInwardBounces / totalDebitsSum;
-    }
-  }
-  console.log('inwardPercentageResult:', inwardPercentageResult);
-  return inwardPercentageResult;
-};
-
-const outwardChequeBouncesCount_2 = async (monthlyDetailsSegment) => {
-  let monthlyDetailArrr = [];
-  let outwardBouncesCount = 0;
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    // console.log(monthlyDetailsSegment[i]["$"]["startDate"]);
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (
-      msBetweenDates <= outwardBouncesMonth // Outward Cheque bounces month to be changed
-    ) {
-      //   console.log(i,msBetweenDates);
-      outwardBouncesCount =
-        outwardBouncesCount + Number(monthlyDetailsSegment[i]['$']['outwBounces']);
-    }
-  }
-  console.log('outwardBouncesCount:', outwardBouncesCount);
-  return outwardBouncesCount;
-};
-
-const outwardPercentage_2 = async (monthlyDetailsSegment) => {
-  let monthlyDetailArrr = [];
-  let totalCreditsSum = 0;
-  let totaloutwardBounces = 0;
-  let outwardPercentageResult = 0;
-  for (const a in monthlyDetailsSegment) {
-    totalCreditsSum = totalCreditsSum + Number(monthlyDetailsSegment[a]['$']['credits']);
-    totaloutwardBounces =
-      totaloutwardBounces + Number(monthlyDetailsSegment[a]['$']['outwBounces']);
-  }
-  console.log('totalCreditsSum:', totalCreditsSum, 'totaloutwardBounces:', totaloutwardBounces);
-
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (
-      msBetweenDates <= outwardPercentMonth &&
-      totalCreditsSum > 10 // Inward Cheque bounces month to be changed
-    ) {
-      //   console.log(totalCreditsSum, msBetweenDates);
-      outwardPercentageResult = totaloutwardBounces / totalCreditsSum;
-    }
-  }
-  console.log('outwardPercentageResult:', outwardPercentageResult);
-  return outwardPercentageResult;
-};
-
-const numberOfCredits_2 = async (monthlyDetailsSegment) => {
-  let monthlyDetailArrr = [];
-  let sumOfCredits = 0;
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (
-      msBetweenDates <= numberOfCreditMonth // Inward Cheque bounces month to be changed
-    ) {
-      // console.log(i, msBetweenDates);
-      sumOfCredits = sumOfCredits + Number(monthlyDetailsSegment[i]['$']['credits']);
-    }
-  }
-  console.log('sumOfCredits:', sumOfCredits);
-  return sumOfCredits;
-};
-
-const numberOfDebits_2 = async (monthlyDetailsSegment) => {
-  let monthlyDetailArrr = [];
-  let sumOfDebits = 0;
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (
-      msBetweenDates <= numberOfDebitsMonth // Inward Cheque bounces month to be changed
-    ) {
-      //   console.log(i, msBetweenDates);
-      sumOfDebits = sumOfDebits + Number(monthlyDetailsSegment[i]['$']['debits']);
-    }
-  }
-  console.log('sumOfDebits:', sumOfDebits);
-  return sumOfDebits;
-};
-
-const CountOfZeroCreditMonth_2 = async (monthlyDetailsSegment) => {
-  let totalCreditZeroCreditSum = 0;
-  let monthlyDetailArrr = [];
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (
-      msBetweenDates <= totalZeroCreditMonth &&
-      Number(monthlyDetailsSegment[i]['$']['credits']) === 0
-    ) {
-      totalCreditZeroCreditSum += 1;
-    }
-    // console.log(monthlyDetailsSegment[i]["$"]["credits"]);
-  }
-  console.log('totalZeroCreditSum:', totalCreditZeroCreditSum);
-  return totalCreditZeroCreditSum;
-};
-
-const existingLoanobligation_2 = async (existingLoanObligationData) => {
-  let existingLoanObligationSum = 0;
-  let exisingLoanObligationCount = 0;
-  let monthlyDetailArrr = [];
-
-  for (let i = 0; i < existingLoanObligationData.length; i++) {
-    const now = new Date();
-    const then = new Date(existingLoanObligationData[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    if (msBetweenDates === 1) {
-      exisingLoanObligationCount = exisingLoanObligationCount + 1;
-      existingLoanObligationSum =
-        existingLoanObligationSum +
-        Math.floor(Number(existingLoanObligationData[i]['$']['totalEmiOrLoan']));
-    }
-  }
-  return Math.floor(existingLoanObligationSum);
-};
-
-const getMonthDetails = async (perfiosResult, fullData, perfiosAccountNo) => {
-  console.log(perfiosAccountNo, 'perfiosAccountNo');
-  let monthCountArr = [],
-    startDate = '',
-    endDate = '',
-    finalMonthRange = [];
-  let statementDetails = fullData['PIR:Data']?.['Statementdetails'][0]['Statement'];
-  for (let i = 0; i < statementDetails.length; i++) {
-    // console.log(statementDetails[i]["StatementAccounts"][0]["StatementAccount"][0]["$"]["accountNo"], "statementDetails")
-    if (
-      statementDetails[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['accountNo'] ===
-      perfiosAccountNo
-    ) {
-      if (i === 0) {
-        startDate =
-          statementDetails[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsStartDate'];
-        endDate =
-          statementDetails[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsEndDate'];
-      } else {
-        if (
-          new Date(startDate) >
-          new Date(
-            statementDetails[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsStartDate']
-          )
-        ) {
-          startDate =
-            statementDetails[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsStartDate'];
-        }
-        if (
-          new Date(endDate) <
-          new Date(
-            statementDetails[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsEndDate']
-          )
-        ) {
-          endDate =
-            statementDetails[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsEndDate'];
-        }
-        if (startDate === '' && endDate === '') {
-          startDate =
-            statementDetails[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsStartDate'];
-          endDate =
-            statementDetails[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsEndDate'];
-        }
-      }
-    }
-  }
-  console.log(startDate, 'startDate', endDate, 'endDate');
-  let computedDate =
-    new Date(endDate).getMonth() -
-    new Date(startDate).getMonth() +
-    12 * (new Date(endDate).getFullYear() - new Date(startDate).getFullYear());
-  console.log(computedDate, 'computedDates');
-  let range = await createMonthRange();
-  if (computedDate >= 6) {
-    let startMonth = new Date(startDate).toLocaleString('en-GB', {
-      month: 'short',
-      year: 'numeric',
-    });
-    startMonth =
-      startMonth.length > 8
-        ? startMonth.substring(0, 3) + '-' + startMonth.substring(7, 9)
-        : startMonth.substring(0, 3) + '-' + startMonth.substring(6, 8);
-    let endMonth = new Date(endDate).toLocaleString('en-GB', {
-      month: 'short',
-      year: 'numeric',
-    });
-    endMonth =
-      endMonth.length > 8
-        ? endMonth.substring(0, 3) + '-' + endMonth.substring(7, 9)
-        : endMonth.substring(0, 3) + '-' + endMonth.substring(6, 8);
-    let computedMonthRange = await createDynamicMonthRange(computedDate, startDate);
-    for (let i = 0; i < computedMonthRange.length; i++) {
-      if (range.includes(computedMonthRange[i])) {
-        finalMonthRange.push(computedMonthRange[i]);
-      }
-    }
-    console.log(finalMonthRange[0], 'finalMonthRange[finalMonthRange.length - 1]');
-    const [monthStr, yearStr] = finalMonthRange[0].split('-');
-
-    // Convert month abbreviation to a number
-    const monthMap = {
-      Jan: 0,
-      Feb: 1,
-      Mar: 2,
-      Apr: 3,
-      May: 4,
-      Jun: 5,
-      Jul: 6,
-      Aug: 7,
-      Sep: 8,
-      Oct: 9,
-      Nov: 10,
-      Dec: 11,
-    };
-
-    const month = monthMap[monthStr];
-
-    // Parse the year as a 4-digit number (assuming 'YY' represents '20YY')
-    const year = parseInt(yearStr, 10) + 2000;
-    // Get the ISO formatted date string
-    const isoDate = `${year}-${month < 9 ? '0' : ''}${month + 1}-01`;
-    startDate = isoDate;
-  } else {
-    let computedMonthRange = await createDynamicMonthRange(computedDate, startDate);
-    for (let i = 0; i < computedMonthRange.length; i++) {
-      if (range.includes(computedMonthRange[i])) {
-        finalMonthRange.push(computedMonthRange[i]);
-      }
-    }
-    // console.log(range, computedMonthRange, "range")
-  }
-  // for (let i = 0; i < perfiosResult.length; i++) {
-  //     if (Number(perfiosResult[i]["$"]["xnsCount"]) > 0)
-  //         monthCountArr.push(perfiosResult[i]["$"]["monthName"])
-  // }
-  // console.log(monthCountArr, "monthcountArr")
-  return { finalMonthRange, startDate, endDate };
-};
-
-const createMonthRange = async () => {
-  let arr = [];
-  let maximumMonth = 13;
-  for (let i = 1; i <= maximumMonth; i++) {
-    var makeDate = new Date();
-    // makeDate.setMonth(makeDate.getMonth() - i);
-    makeDate = moment(new Date()).subtract(i, 'months').format('MMM-YY');
-    // makeDate = new Date(makeDate).toLocaleString('en-GB', { month: 'short', year: 'numeric' })
-    // console.log(new Date(makeDate).toLocaleString('en-GB', { month: 'short', year: 'numeric' }), "makeDate.setMonth(makeDate.getMonth() - i)",i)
-    // makeDate = makeDate.length > 8 ? makeDate.substring(0, 3) + "-" + makeDate.substring(7, 9) : makeDate.substring(0, 3) + "-" + makeDate.substring(6, 8)
-    // console.log(makeDate, "makeDate")
-    arr.push(makeDate);
-  }
-  return arr;
-};
-
-const createDynamicMonthRange = async (length, date) => {
-  let arr = [];
-  for (let i = 0; i <= length; i++) {
-    var makeDate = new Date(date || '');
-    makeDate = moment(new Date(date)).add(i, 'M').format('MMM-YY');
-    // makeDate.setMonth(makeDate.getMonth() + i);
-    // makeDate = new Date(makeDate).toLocaleString('en-GB', { month: 'short', year: 'numeric' })
-    // makeDate = makeDate.length > 8 ? makeDate.substring(0, 3) + "-" + makeDate.substring(7, 9) : makeDate.substring(0, 3) + "-" + makeDate.substring(6, 8)
-    // console.log(makeDate,"makeDate")
-    arr.push(makeDate);
-  }
-  return arr;
-};
-
-const validatePerfiosResult = async (
-  perfiosResult,
-  index,
-  perfiosAccountNo,
-  xnsStartDate,
-  xnsEndDate
-) => {
-  try {
-    let perfiosData;
-    let perfiosDataArr = [];
-    if (perfiosResult['PIR:Data']?.['Statementdetails']) {
-      if (Array.isArray(perfiosResult['PIR:Data']['Statementdetails'][0]['Statement'])) {
-        for (
-          let i = 0;
-          i < perfiosResult['PIR:Data']['Statementdetails'][0]['Statement'].length;
-          i++
-        ) {
-          let startDate =
-            perfiosResult['PIR:Data']['Statementdetails'][0]['Statement'][i][
-            'StatementAccounts'
-            ][0]['StatementAccount'][0]['$']['xnsStartDate'];
-          if (
-            perfiosAccountNo ===
-            perfiosResult['PIR:Data']['Statementdetails'][0]['Statement'][i][
-            'StatementAccounts'
-            ][0]['StatementAccount'][0]['$']['accountNo']
-            // && Date.parse(new Date(startDate)) >= Date.parse(new Date(xnsStartDate))
-            // && Date.parse(new Date(startDate)) <= Date.parse(new Date(xnsEndDate))
-          ) {
-            let data1 =
-              perfiosResult['PIR:Data']?.['Statementdetails']?.[0]?.['Statement']?.[i]?.['$']?.[
-              'statementStatus'
-              ] || 'VERIFIED';
-
-            perfiosDataArr.push(data1);
-            perfiosData = perfiosDataArr;
-            console.log(perfiosDataArr, 'perfiosDataArr');
-            // return data1
-            if (perfiosDataArr.includes('FRAUD')) {
-              return 'FRAUD';
-            } else if (perfiosDataArr.includes('Rejected')) {
-              return 'FRAUD';
-            }
-            else if (perfiosDataArr.includes('Processed')) {
-              return 'VERIFIED';
-            }
-            else if (perfiosDataArr.includes('REFER')) {
-              return 'REFER';
-            }
-          }
-        }
-        return perfiosDataArr.includes('NA') ? 'NA' : 'VERIFIED'; // Returning true because no REFER or FRAUD was identified
-      } else {
-        perfiosData =
-          perfiosResult?.['PIR:Data']?.['Statementdetails']?.['Statement']?.['$']?.[
-          'statementStatus'
-          ] || 'VERIFIED';
-
-        if (perfiosData === 'FRAUD') {
-          return 'FRAUD';
-        } else if (perfiosData === 'REFER') {
-          return 'REFER';
-        } else if (perfiosData === 'VERIFIED' || perfiosData === "Processed") {
-          return 'VERIFIED';
-        }
-      }
-    } else if (perfiosResult['PIR:Data']?.['Statementdetails']) {
-      perfiosData =
-        perfiosResult?.['PIR:Data']?.['Statementdetails']?.['Statement']?.['$']?.[
-        'statementStatus'
-        ] || 'VERIFIED';
-      console.log(perfiosData, 'perfiosDataResult');
-      return perfiosData;
-    } else {
-      return [];
-    }
-    console.log(perfiosData, 'perfiosData');
-  } catch (error) {
-    console.log(error, 'error');
-    return [];
-  }
-};
-const maxUtilization = async (data, index) => {
-  try {
-    let count = 0;
-    let maxUtilizationData = data[0]?.[`MonthlyDetail` + (index + 1)][0]?.['Detail'];
-    // console.log(maxUtilizationData, "maxUtilizationData")
-    for (let i = 0; i < maxUtilizationData.length; i++) {
-      count += Number(maxUtilizationData[i]['$']['maximumUtilization']);
-      // console.log("Count", i, count)
-    }
-    return count.toString();
-  } catch (error) {
-    console.log(error, 'error in max utilization');
-    return false;
-  }
-};
-
-const minUtilization = async (data, index) => {
-  try {
-    let count = 0;
-    let minimumUtilizationData = data[0]?.[`MonthlyDetail` + (index + 1)][0]?.['Detail'];
-    // console.log(minimumUtilizationData, "minimumUtilizationData")
-    for (let i = 0; i < minimumUtilizationData.length; i++) {
-      count += Number(minimumUtilizationData[i]['$']['minimumUtilization']);
-      // console.log("Count", i, count)
-    }
-    return count.toString();
-  } catch (error) {
-    console.log(error, 'error in min utilization');
-    return false;
-  }
-};
-
-const avgUtilization = async (data, index, monthRangeCount) => {
-  try {
-    let count = 0;
-    let minimumUtilizationData = data[0]?.[`MonthlyDetail` + (index + 1)][0]?.['Detail'];
-    // console.log(minimumUtilizationData, "minimumUtilizationData")
-    for (let i = 0; i < minimumUtilizationData.length; i++) {
-      count += Number(minimumUtilizationData[i]['$']['averageUtilization']);
-      // console.log("Count", i, count)
-    }
-    if (count > 0) {
-      count = count / monthRangeCount.length;
-      console.log(count, monthRangeCount.length);
-      return count.toFixed(2).toString();
-    } else {
-      return '0';
-    }
-  } catch (error) {
-    console.log(error, 'error in min utilization');
-    return false;
-  }
-};
-
-const applicantzeroCredit = async (perfiosResult) => {
-  let monthlyDetailsSegment;
-  let monthlyDetailArrr = [];
-  if (perfiosResult['PIR:Data'].hasOwnProperty('AccountAnalysis')) {
-    if (Array.isArray(perfiosResult['PIR:Data']['AccountAnalysis'])) {
-      for (let i = 0; i < perfiosResult['PIR:Data']['AccountAnalysis'].length; i++) {
-        let data1 = perfiosResult['PIR:Data']['AccountAnalysis'][i];
-        for (let j = 0; j < data1['MonthlyDetails'][0]['MonthlyDetail'].length; j++) {
-          monthlyDetailArrr.push(
-            perfiosResult['PIR:Data']['AccountAnalysis'][i]['MonthlyDetails'][0]['MonthlyDetail'][j]
-          );
-        }
-      }
-      monthlyDetailsSegment = monthlyDetailArrr;
-    } else {
-      monthlyDetailsSegment =
-        perfiosResult['PIR:Data']['AccountAnalysis']['MonthlyDetails']['MonthlyDetail'];
-    }
-  } else {
-    monthlyDetailsSegment = perfiosResult['PIR:Data']['MonthlyDetails'][0]['MonthlyDetail'];
-  }
-  let isZeroCredit = 0;
-  let monthCountArr = [];
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (
-      true
-      // msBetweenDates <= numberOfCreditMonth // Inward Cheque bounces month to be changed
-    ) {
-      // console.log(i, msBetweenDates);
-      // if (
-      //   Number(monthlyDetailsSegment[i]["$"]["credits"]) > 0 ||
-      //   Number(monthlyDetailsSegment[i]["$"]["debits"]) > 0
-      // ) {
-      //   isZeroCredit = isZeroCredit + 1;
-      // }
-      if (
-        !monthCountArr.includes(monthlyDetailsSegment[i]['$']['monthName']) &&
-        Number(monthlyDetailsSegment[i]['$']['credits']) <= 0
-      ) {
-        monthCountArr.push(monthlyDetailsSegment[i]['$']['monthName']);
-      }
-    }
-  }
-  // console.log(monthCountArr, "monthCountArr1");
-  // console.log("isZeroCredit:", isZeroCredit);
-  return monthCountArr?.length > 0 ? true : false;
-};
-
-// Scanned pdf -- new xml
-
-const applicantzeroCredit1 = async (perfiosResult) => {
-  let monthlyDetailsSegment;
-  let monthlyDetailArrr = [];
-  // if (perfiosResult["PIR:Data"].hasOwnProperty("AccountAnalysis")) {
-  //     if (Array.isArray(perfiosResult["PIR:Data"]["AccountAnalysis"])) {
-  //         for (
-  //             let i = 0;
-  //             i < perfiosResult["PIR:Data"]["AccountAnalysis"].length;
-  //             i++
-  //         ) {
-  //             let data1 = perfiosResult["PIR:Data"]["AccountAnalysis"][i];
-  //             for (
-  //                 let j = 0;
-  //                 j < data1["MonthlyDetails"][0]["MonthlyDetail"].length;
-  //                 j++
-  //             ) {
-  //                 monthlyDetailArrr.push(
-  //                     perfiosResult["PIR:Data"]["AccountAnalysis"][i]["MonthlyDetails"][0][
-  //                     "MonthlyDetail"
-  //                     ][j],
-  //                 );
-  //             }
-  //         }
-  //         monthlyDetailsSegment = monthlyDetailArrr;
-  //     } else {
-  //         monthlyDetailsSegment =
-  //             perfiosResult["PIR:Data"]["AccountAnalysis"]["MonthlyDetails"][
-  //             "MonthlyDetail"
-  //             ];
-  //     }
-  // } else {
-  monthlyDetailsSegment = perfiosResult['PIR:Data']['MonthlyDetails'][0]['MonthlyDetail'];
-  // }
-  let isZeroCredit = 0;
-  let monthCountArr = [];
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    const now = new Date();
-    const then = new Date(monthlyDetailsSegment[i]['$']['startDate']);
-    var msBetweenDates =
-      now.getMonth() - then.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // console.log(msBetweenDates);
-    if (
-      true
-      // msBetweenDates <= numberOfCreditMonth // Inward Cheque bounces month to be changed
-    ) {
-      // console.log(i, msBetweenDates);
-      // if (
-      //   Number(monthlyDetailsSegment[i]["$"]["credits"]) > 0 ||
-      //   Number(monthlyDetailsSegment[i]["$"]["debits"]) > 0
-      // ) {
-      //   isZeroCredit = isZeroCredit + 1;
-      // }
-      if (
-        !monthCountArr.includes(monthlyDetailsSegment[i]['$']['monthName']) &&
-        Number(monthlyDetailsSegment[i]['$']['credits']) <= 0
-      ) {
-        monthCountArr.push(monthlyDetailsSegment[i]['$']['monthName']);
-      }
-    }
-  }
-  console.log(monthCountArr, 'monthCountArr1');
-  // console.log("isZeroCredit:", isZeroCredit);
-  return monthCountArr?.length > 0 ? true : false;
-};
-
-const getConsolidatedData = async (perfiosResult, additionMonthlyDetails, index, monthDetails) => {
-  let monthlyDetailsSegment;
-  let arr = [],
-    monthlyDetailArrr = [];
-  // if (perfiosResult["PIR:Data"].hasOwnProperty("AccountAnalysis")) {
-  //     if (Array.isArray(perfiosResult["PIR:Data"]["AccountAnalysis"])) {
-  //         for (
-  //             let i = 0;
-  //             i < perfiosResult["PIR:Data"]["AccountAnalysis"].length;
-  //             i++
-  //         ) {
-  //             let data1 = perfiosResult["PIR:Data"]["AccountAnalysis"][i];
-  //             for (
-  //                 let j = 0;
-  //                 j < data1["MonthlyDetails"][0]["MonthlyDetail"].length;
-  //                 j++
-  //             ) {
-  //                 monthlyDetailArrr.push(
-  //                     perfiosResult["PIR:Data"]["AccountAnalysis"][i]["MonthlyDetails"][0][
-  //                     "MonthlyDetail"
-  //                     ][j],
-  //                 );
-  //             }
-  //         }
-  //         monthlyDetailsSegment = monthlyDetailArrr;
-  //     } else {
-  //         monthlyDetailsSegment =
-  //             perfiosResult["PIR:Data"]["AccountAnalysis"]["MonthlyDetails"][
-  //             "MonthlyDetail"
-  //             ];
-  //     }
-  // } else {
-  monthlyDetailsSegment = perfiosResult[0]['MonthlyDetail'];
-  let additionalMonthlyDetailsSegment =
-    additionMonthlyDetails[0][`MonthlyDetail` + (index + 1)][0]['Detail'];
-  // }
-
-  // console.log(additionalMonthlyDetailsSegment, "monthlyDetailsSegment")
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    let obj = {};
-    if (
-      Number(monthlyDetailsSegment[i]['$']['xnsCount']) > 0 ||
-      monthDetails.finalMonthRange.includes(monthlyDetailsSegment[i]['$']['monthName'])
-    ) {
-      obj['monthYear'] = monthlyDetailsSegment[i]['$']['monthName'];
-      obj['balAvg'] = monthlyDetailsSegment[i]['$']['balAvg'];
-      obj['debitsCount'] = additionalMonthlyDetailsSegment[i]['$']['debits'];
-      obj['debitsSum'] = additionalMonthlyDetailsSegment[i]['$']['totalDebit'];
-      obj['creditsCount'] = additionalMonthlyDetailsSegment[i]['$']['credits'];
-      obj['creditsSum'] = additionalMonthlyDetailsSegment[i]['$']['totalCredit'];
-      obj['inwChqCount'] = monthlyDetailsSegment[i]['$']['inwBounces'];
-      obj['outwChqCount'] = monthlyDetailsSegment[i]['$']['outwBounces'];
-      obj['dpLimit'] = monthlyDetailsSegment[i]['$']['dpLimit'];
-      obj['snLimit'] = monthlyDetailsSegment[i]['$']['snLimit'];
-      obj['totalEmiLoanAmount'] = monthlyDetailsSegment[i]['$']['totalEmiOrLoan'];
-      obj['totalEmiLoanCount'] = monthlyDetailsSegment[i]['$']['emiOrLoans'];
-      obj['emiBounces'] = monthlyDetailsSegment[i]['$']['inwEMIBounces'];
-      obj['xnsCount'] = monthlyDetailsSegment[i]['$']['xnsCount'];
-      obj['overdrawnDays'] = monthlyDetailsSegment[i]['$']['overdrawnDays'];
-      obj['penalCharges'] = monthlyDetailsSegment[i]['$']['penalCharges'];
-      obj['intPayDelay'] = monthlyDetailsSegment[i]['$']['intPayDelay'];
-      obj['avgUtilization'] = additionalMonthlyDetailsSegment[i]['$']['averageUtilization'];
-      obj['maximumUtilization'] = additionalMonthlyDetailsSegment[i]['$']['maximumUtilization'];
-      obj['minimumUtilization'] = additionalMonthlyDetailsSegment[i]['$']['minimumUtilization'];
-      obj['avgNegEOD'] = monthlyDetailsSegment[i]['$']['avgNegEOD'] || 0;
-      obj['balMinNeg'] = monthlyDetailsSegment[i]['$']['balMinNeg'] || 0;
-      obj['balMin'] = monthlyDetailsSegment[i]['$']['balMin'] || 0;
-      arr.push(obj);
-    }
-  }
-  // console.log(arr)
-  return arr;
-};
-async function getMonthDifference(givenDate) {
-  // Convert the given date string to a Date object
-  // console.log(givenDate, "givenDate")
-  const [month, year] = givenDate.split('-');
-  const givenDateObj = new Date(`${month}-01-${year}`);
-
-  // Current date
-  const currentDate = new Date();
-
-  // Calculate the month difference
-  const monthDiff =
-    (currentDate.getFullYear() - givenDateObj.getFullYear()) * 12 +
-    currentDate.getMonth() -
-    givenDateObj.getMonth();
-
-  return monthDiff;
+string standalone.test_perfios_online(String id)
+{
+/*Modification History
+CTLZ-48279  Include "employmentType" in Perfios BSA API Request Payload			Alan			25-Feb-2026
+CTLZ-48410  Choice ALL Flow Enhancement – Use Existing API for AA with			Alan			09-Mar-2026  
+Recurring Consent Screens & S3 Bucket Provision for Bulk Upload Results		
+CTLZ-49330  Smart Routing Enhancement											Prathiba		21-Apr-2026	
+Novel Standalone copy for the Novel journey: no Account Aggregator after a Novel reject, returns "LINK:" instead of openUrl
+*/
+dmp = Map();
+dmp.put("From","Deluge Function");
+dmp.put("Function Name","Perfios_link");
+dmp.put("Name","Perfios_link");
+try 
+{
+	// bank details 
+	instituition_List = List();
+	bfsi_bridge_domain = zoho.crm.getOrgVariable("BFSIBridgeDomain");
+	bank_details = zoho.crm.getRecordById("Bank_Details",id);
+	loan_type = bank_details.get("Loan_Type");
+	email_id = ifnull(bank_details.get("Email_ID"),"");
+	// Novel
+	novel_cancelled = ifnull(bank_details.get("Novel_Cancelled"),false);
+	try 
+	{
+		SL_DP_datas = bank_details.get("SL_DP_Data");
+		if(SL_DP_datas.size() > 0)
+		{
+			for each  sl_dps in SL_DP_datas
+			{
+				//added by Prathiba
+				if(isNull(sl_dps.get("Transaction_ID")))
+				{
+					if(isNull(sl_dps.get("Name_of_the_Bank")))
+					{
+						return "Kindly select 'Name of the Bank' in Account Details";
+					}
+					// the bank details of this row are read below, one query per row, when the new Perfios request is built
+				}
+				//end by Prathiba
+				info instituition_List;
+				if(sl_dps.get("Type_of_Account") == "OD" || sl_dps.get("Type_of_Account") == "CC")
+				{
+					field_api_names = {"Sanction_Limit_OD_CC_Month","Drawing_Power_OD_CC_Month"};
+					loan_id = ifnull(ifnull(bank_details.getJSON("Loan_Application"),Map()).getJSON("id"),"");
+					business_details = zoho.crm.getRecordById("Accounts",loan_id);
+					if(business_details.get("Banking_Requirement_Type") == "With ABB Prime")
+					{
+						iterations = {1,2,3,4,5,6,7,8,9,10,11,12,13};
+					}
+					else if(loan_type.equalsIgnoreCase("Professional Loan") && business_details.get("Month_Bank_Statement_Requirement") == "Yes")
+					{
+						iterations = {1,2,3,4,5,6,7,8,9,10,11,12,13};
+					}
+					else
+					{
+						iterations = {1,2,3,4,5,6};
+					}
+					for each  field in field_api_names
+					{
+						info field;
+						for each  i in iterations
+						{
+							if(field == "Sanction_Limit_OD_CC_Month")
+							{
+								if(!matches(sl_dps.get(field + i),"[0-9]+\\.[0-9]+") && !matches(sl_dps.get(field + i),"[0-9]+") && !matches(sl_dps.get(field + i),"-[0-9]+"))
+								{
+									info "";
+									return "Sanction Limit cannot have alphabets or special characters.";
+								}
+								if(sl_dps.get(field + i) < 0)
+								{
+									info sl_dps.get(field + i);
+									info "check 1";
+									return "Sanction Limit cannot be a Negative Value.";
+								}
+							}
+							else
+							{
+								if(!matches(sl_dps.get(field + i),"[0-9]+\\.[0-9]+") && !matches(sl_dps.get(field + i),"[0-9]+") && !matches(sl_dps.get(field + i),"-[0-9]+"))
+								{
+									return "Drawing Power cannot have alphabets or special characters.";
+								}
+								if(sl_dps.get(field + i) < 0)
+								{
+									info "check 2";
+									return "Drawing Power cannot be a Negative Value.";
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	catch (e)
+	{
+		info e + "SL/DP Vaildation check error";
+	}
+	//perfios cr
+	loan_id = ifnull(ifnull(bank_details.getJSON("Loan_Application"),Map()).getJSON("id"),"");
+	app_id = ifnull(ifnull(bank_details.getJSON("Applicant"),Map()).getJSON("id"),"");
+	info app_id;
+	app = zoho.crm.getRecordById("Contacts",app_id);
+	app_no = app.get("LAN_NO");
+	//Added By Alan to get Mobile No Start
+	mobileno = "";
+	constitution = app.get("Constitution_Type");
+	if(constitution = "Limited Liability Partnership" || constitution = "OPC - One Person Company" || constitution = "Partnership" || constitution = "Private Ltd" || constitution = "Public Ltd")
+	{
+		mobileno = ifnull(app.get("Key_Person_Mobile_Number"),"");
+	}
+	else
+	{
+		mobileno = ifnull(app.get("Primary_Applicant_Phone"),"");
+	}
+	info mobileno;
+	//Added By Alan to get Mobile No End
+	l_data = Map();
+	try 
+	{
+		bank_rec_status = ifnull(app.getJSON("Bank_Details_Record_Status"),0);
+		if(bank_rec_status.toLong() != 2)
+		{
+			ump = Map();
+			ump.put("Bank_Details_Record_ID",id);
+			ump.put("Bank_Details_Record_Status",1);
+			l_data.put("ump_map",ump);
+			upresp = zoho.crm.updateRecord("Contacts",app_id,ump);
+			l_data.put("upresp_value",upresp);
+		}
+	}
+	catch (error)
+	{
+		log_data = Map();
+		log_data.put("Name","Function Error - Save as Draft - Banking Details (Wizard)");
+		log_data.put("Deluge_Function_Name","Perfios_link : Button");
+		log_data.put("Applicant",app_id);
+		log_data.put("Loan_Application",loan_id);
+		log_data.put("Id_of_Record",id);
+		log_data.put("API","Function Error - 'Perfios_link'");
+		log_data.put("Response",l_data.toString());
+		log_data.put("Request",error.toString());
+		zoho.crm.createRecord("Logger",log_data);
+		emp = Map();
+		emp.put("details",dmp);
+		emp.put("error_message",error.toString());
+		emp.put("action_performed","Perfios_link > records updating.");
+		info emp;
+		info standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
+	}
+	// try{
+	url = "";
+	search = false;
+	subform_id = "";
+	lead_id = bank_details.get("Name");
+	if(app_id.toString().len() > 0)
+	{
+		appli_details = zoho.crm.getRecordById("Contacts",id);
+		if(ifnull(appli_details.getJSON("Bank_Details_Record_Status"),"").toString().len() > 0)
+		{
+			info zoho.crm.updateRecord("Contacts",app_id,{"Bank_Details_Record_Status":1});
+		}
+	}
+	loan_type = bank_details.get("Loan_Type");
+	app_no = bank_details.get("Name");
+	additional = bank_details.get("Additional_banks_details");
+	banks = bank_details.get("Bank_account").size();
+	loan = zoho.crm.getRecordById("Accounts",loan_id);
+	info zoho.crm.updateRecord("Bank_Details",id,{"Perfios_online":true,"Bank_Record_ID":id,"Name":app_no});
+	info additional.size();
+	acc_type = "";
+	s_no = 1;
+	if(additional.size() > 0)
+	{
+		if(additional.get(0).get("Where_would_you_want_to_upload_bank_statements") != "" && additional.get(0).get("Where_would_you_want_to_upload_bank_statements") != null)
+		{
+			where = "";
+			for each  i in additional
+			{
+				info i;
+				info i.get("Account_Type");
+				// 				if(i.get("Account_Type") != null && i.get("Account_Type") != "")
+				// 				{
+				if(ifnull(i.get("Status"),"").equalsIgnoreCase("Pending") || ifnull(i.get("Status"),"").equalsIgnoreCase("Link Generated") || i.get("Status") == null)
+				{
+					where = i.get("Where_would_you_want_to_upload_bank_statements");
+					subform_id = i.get("id");
+					s_no = ifnull(i.get("LinkingModule52_Serial_Number"),1);
+					acc_type = i.get("Account_Type");
+					//search and if yes use same link else new
+					bank_type = "additional";
+					search = true;
+					break;
+				}
+				// 				}
+				// 				else
+				// 				{
+				// 					return "Please enter the Account type to proceed";
+				// 					break;
+				// 				}
+			}
+		}
+	}
+	if(subform_id == "")
+	{
+		info "add row to add additional";
+		return "Please add account type and where to upload details to proceed";
+	}
+	else
+	{
+		//url is empty generate new
+		search = true;
+		employment_loan = "";
+		constitution = "";
+		if(app.get("Applicants_Type").equalsIgnoreCase("Applicant"))
+		{
+			employment_loan = app.get("Applicant_Employment_Type");
+			constitution = app.get("Constitution_Type");
+			// 		 jagatheees -CTLZ-76214  start
+			pan_number = ifnull(app.get("Applicant_PAN_No"),"");
+			//date_of_birth = ifnull(app.get("Date_of_Birth"),app.get("Date_of_Incorporation_Inception"));
+			if(app.get("Primary_Applicant_Phone").length() > 10)
+			{
+				mobileNumber = ifnull(app.get("Primary_Applicant_Phone").subString(3,13),"");
+			}
+			else
+			{
+				mobileNumber = ifnull(app.get("Primary_Applicant_Phone"),"");
+			}
+			// 		 jagatheees -CTLZ-76214  end
+		}
+		else if(app.get("Applicants_Type").equalsIgnoreCase("co-applicant"))
+		{
+			employment_loan = app.get("Co_Applicant_Employment_Type");
+			constitution = app.get("Co_Applicant_Constitution_Type");
+			// 		 jagatheees -CTLZ-76214  start
+			pan_number = ifnull(app.get("Co_App_PAN_No"),"");
+			//date_of_birth = ifnull(app.get("Co_App_Date_of_Birth"),app.get("Date_of_Incorporation_Inception"));
+			// 			mobileNumber =ifnull(app.get("Mobile_No").toString().replaceAll("+91", ""),"");
+			if(app.get("Mobile_No").length() > 10)
+			{
+				mobileNumber = ifnull(app.get("Mobile_No").subString(3,13),"");
+			}
+			else
+			{
+				mobileNumber = ifnull(app.get("Mobile_No"),"");
+			}
+			// 		 jagatheees -CTLZ-76214  end
+		}
+		else if(app.get("Applicants_Type").equalsIgnoreCase("Guarantor"))
+		{
+			employment_loan = app.get("Guarantor_Employment_Type");
+			constitution = app.get("Guarantor_Constitution_Type");
+		}
+		// 	if(loan_type.equalsIgnoreCase("Personal Loan"))
+		// 	{
+		// 		if(employment_loan == "Salaried")
+		// 		{
+		// 			if(!acc_type.equalsIgnoreCase("Savings") && !acc_type.equalsIgnoreCase("OD"))
+		// 			{
+		// 				return "Account type is not acceptable account, only Savings,OD account types allowed";
+		// 			}
+		// 		}
+		// 		else
+		// 		{
+		// 			if(!acc_type.equalsIgnoreCase("Savings")&& !acc_type.equalsIgnoreCase("OD")){
+		// 			}
+		// 		}
+		// 	}
+		// 	else if(loan_type.equalsIgnoreCase("Professional Loan"))
+		// 	{
+		// 		if(acc_type.equalsIgnoreCase("Savings")&& acc_type.equalsIgnoreCase("OD")){
+		// 			}
+		// 	}
+		// 	else if(loan_type.equalsIgnoreCase("Business Loan"))
+		// 	{
+		// 		if(constitution != null)
+		// 		{
+		// 			if(!ifnull(constitution,"").equalsIgnoreCase("Sole Proprietor"))
+		// 			{
+		// 				if(acc_type.equalsIgnoreCase("Savings"))
+		// 				{
+		// 					return "Account type is not acceptable account, only Current,OD,CC account types allowed";
+		// 				}
+		// 			}
+		// 		}
+		// 	}
+		info "generate link";
+	}
+	//swathi start
+	// 	if(search)
+	// 	{
+	// 		query = "select Perfios_Link,Perfios_Status from Logger where ((((API='Perfios Generate Link' and API_Call_Status='Success') and Applicant_ID='" + app_id + "') and Loan_Application_ID='" + loan_id + "') and Link_Status='Completed') order by Created_Time desc limit 0,1";
+	// 		queryMap = Map();
+	// 		queryMap.put("select_query",query);
+	// 		// info query;
+	// 		resp = invokeurl
+	// 		[
+	// 			url :"https://www.zohoapis.in/crm/v8/coql"
+	// 			type :POST
+	// 			parameters:queryMap.toString()
+	// 			connection:"zohocrmall"
+	// 		];
+	// 		info resp;
+	// 		if(resp != "")
+	// 		{
+	// 			for each  i in resp.get("data")
+	// 			{
+	// 				try 
+	// 				{
+	// 					if(i.get("Perfios_Status") == "Pending")
+	// 					{
+	// 						return "Please Fetch Bank Statement Details for recevied callback";
+	// 					}
+	// 				}
+	// 				catch (e)
+	// 				{
+	// 					info "catch in Perfios_Status :" + e;
+	// 					emp = Map();
+	// 					emp.put("details",dmp);
+	// 					emp.put("error_message",e.toString());
+	// 					emp.put("action_performed","Perfios_link > Condition based records checking.");
+	// 					info emp;
+	// 					info standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// 	if(search)
+	// 	{
+	// 		query = "select Perfios_Link,Perfios_Status,Perfios_Expiry_Date,Link_Status from Logger where ((((API='Perfios Generate Link' and API_Call_Status='Success') and Applicant_ID='" + app_id + "') and Loan_Application_ID='" + loan_id + "') and Link_Status='Pending') order by Created_Time desc limit 0,1";
+	// 		queryMap = Map();
+	// 		queryMap.put("select_query",query);
+	// 		// info query;
+	// 		resp = invokeurl
+	// 		[
+	// 			url :"https://www.zohoapis.in/crm/v8/coql"
+	// 			type :POST
+	// 			parameters:queryMap.toString()
+	// 			connection:"zohocrmall"
+	// 		];
+	// 		info resp;
+	// 		expiryDate = "";
+	// 		if(resp != "")
+	// 		{
+	// 			for each  i in resp.get("data")
+	// 			{
+	// 				//Code added by Prathiba for CTLZ-32945
+	// 				if(i.get("Perfios_Status") == "Pending" && i.get("Perfios_Expiry_Date") != "")
+	// 				{
+	// 					expiryDate = i.get("Perfios_Expiry_Date").toDate();
+	// 					currentDate = zoho.currenttime;
+	// 					numberofdays = daysBetween(currentDate,expiryDate);
+	// 					numberofdays = daysBetween(currentDate,expiryDate);
+	// 					info numberofdays;
+	// 					if(numberofdays > 0)
+	// 					{
+	// 						info "if";
+	// 						expirystatus = "Not Expired";
+	// 						// 						// Sivaranjani added
+	// 						// 						return "Please Fetch Bank Statement Details for recevied callback";
+	// 						// 						// 						Sivaranjani ended
+	// 					}
+	// 					else
+	// 					{
+	// 						info "else";
+	// 						expirystatus = "Expired";
+	// 					}
+	// 					info i.get("Link_Status");
+	// 					if(expirystatus == "Expired")
+	// 					{
+	// 						info zoho.crm.updateRecord("Logger",i.get("id"),{"Perfios_Status":"Failed"});
+	// 						info zoho.crm.updateRecord("Logger",i.get("id"),{"Link_Status":"Failed"});
+	// 					}
+	// 					else
+	// 					{
+	// 						url = i.get("Perfios_Link");
+	// 						info url;
+	// 					}
+	// 					//Prathiba code ends for CTLZ-32945
+	// 				}
+	// 				else
+	// 				{
+	// 					url = i.get("Perfios_Link");
+	// 					info url;
+	// 				}
+	// 				// 		openUrl(url,"new window");
+	// 			}
+	// 			//Code added by Prathiba for CTLZ-32945
+	// 			if(expirystatus == "Expired")
+	// 			{
+	// 				info subform_id;
+	// 				for each  k in additional
+	// 				{
+	// 					if(k.get("id") == subform_id)
+	// 					{
+	// 						k.put("Status","Failed");
+	// 					}
+	// 				}
+	// 				info "additional Prathi" + additional;
+	// 				info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false});
+	// 			}
+	// 			//Prathiba Code ends for CTLZ-32945
+	// 			else if(subform_id != "")
+	// 			{
+	// 				info subform_id;
+	// 				for each  k in additional
+	// 				{
+	// 					if(k.get("id") == subform_id)
+	// 					{
+	// 						k.put("Status","Link Generated");
+	// 					}
+	// 				}
+	// 				info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false});
+	// 				//Prathiba code starts for CTLZ-32945
+	// 				info zoho.crm.updateRecord("Logger",i.get("id"),{"Perfios_Status":"Pending"});
+	// 				//Prathiba code ends for CTLZ-32945
+	// 			}
+	// 		}
+	// 	}
+	if(search)
+	{
+		// Single query to fetch latest Completed or Pending link
+		query = "select id,Perfios_Link,Perfios_Status,Perfios_Expiry_Date,Link_Status from Logger where ((((API='Perfios Generate Link' and API_Call_Status='Success') and Applicant_ID='" + app_id + "') and Loan_Application_ID='" + loan_id + "') and (Link_Status='Completed' or Link_Status='Pending')) order by Created_Time desc limit 0,1";
+		queryMap = Map();
+		queryMap.put("select_query",query);
+		info query;
+		resp = invokeurl
+		[
+			url :"https://www.zohoapis.in/crm/v8/coql"
+			type :POST
+			parameters:queryMap.toString()
+			connection:"zohocrmall"
+		];
+		info resp;
+		expiryDate = "";
+		expirystatus = "";
+		url = "";
+		if(resp != "" && resp.get("data") != null)
+		{
+			for each  i in resp.get("data")
+			{
+				try 
+				{
+					// =========================
+					// COMPLETED LINK CHECK
+					// =========================
+					if(i.get("Link_Status") == "Completed")
+					{
+						if(i.get("Perfios_Status") == "Pending")
+						{
+							return "Please Fetch Bank Statement Details for recevied callback";
+						}
+					}
+				}
+				catch (e)
+				{
+					info e;
+				}
+			}
+			for each  i in resp.get("data")
+			{
+				try 
+				{
+					// =========================
+					// PENDING LINK CHECK
+					// =========================
+					if(i.get("Link_Status") == "Pending")
+					{
+						if(i.get("Perfios_Status") == "Pending" && i.get("Perfios_Expiry_Date") != "")
+						{
+							expiryDate = i.get("Perfios_Expiry_Date").toDate();
+							info expiryDate;
+							currentDate = zoho.currenttime;
+							info currentDate;
+							numberofdays = daysBetween(currentDate,expiryDate);
+							info numberofdays;
+							if(numberofdays > 0)
+							{
+								info "if";
+								expirystatus = "Not Expired";
+							}
+							else
+							{
+								info "else";
+								expirystatus = "Expired";
+							}
+							info i.get("Link_Status");
+							info expirystatus;
+							if(expirystatus == "Expired")
+							{
+								info zoho.crm.updateRecord("Logger",i.get("id"),{"Perfios_Status":"Failed"});
+								info zoho.crm.updateRecord("Logger",i.get("id"),{"Link_Status":"Failed"});
+							}
+							else
+							{
+								url = i.get("Perfios_Link");
+								info url;
+							}
+						}
+						else
+						{
+							url = i.get("Perfios_Link");
+							info url;
+						}
+					}
+				}
+				catch (e)
+				{
+					info "catch in Perfios_Status :" + e;
+					emp = Map();
+					emp.put("details",dmp);
+					emp.put("error_message",e.toString());
+					emp.put("action_performed","Perfios_link > Condition based records checking.");
+					info emp;
+					info standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
+				}
+			}
+			// =========================
+			// UPDATE BANK DETAILS
+			// =========================
+			if(expirystatus == "Expired")
+			{
+				info subform_id;
+				for each  k in additional
+				{
+					if(k.get("id") == subform_id)
+					{
+						k.put("Status","Failed");
+					}
+				}
+				info "additional Prathi" + additional;
+				info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false});
+			}
+			else if(subform_id != "")
+			{
+				info subform_id;
+				for each  k in additional
+				{
+					if(k.get("id") == subform_id)
+					{
+						k.put("Status","Link Generated");
+					}
+				}
+				info "additional Prathi" + additional;
+				info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false});
+				info zoho.crm.updateRecord("Logger",i.get("id"),{"Perfios_Status":"Pending"});
+			}
+		}
+	}
+	//swathi end
+	info "where-->" + where + "url:-->" + url;
+	if(!isNull(where) && isNull(url) && expirystatus != "Expired")
+	{
+		//bank_details = zoho.crm.getRecordById("Bank_Details",id);
+		//email_id = bank_details.get("Email_ID");
+		// 	where2 = bank_details.get("Where_would_you_want_to_upload_your_bankstatements");
+		// 	second_bank = bank_details.get("second_bank");
+		//perfios cr
+		SL_DP_data = bank_details.get("SL_DP_Data");
+		// ---- Bank details for the data sources: one query per bank row, like the live function
+		// rows = every bank not processed yet + the bank of the row being processed now (s_no)
+		bank_not_found = false;
+		for each  sd in SL_DP_data
+		{
+			if(isNull(sd.get("Transaction_ID")) || sd.get("S_NO") == s_no && sd.get("Type") == "Perfios Online")
+			{
+				sd_bank = ifnull(sd.get("Name_of_the_Bank"),Map()).get("id");
+				if(isNull(sd_bank))
+				{
+					bank_not_found = true;
+				}
+				else
+				{
+					bk_query = "select Institution_ID,Netbanking_Available,AA_Available,Statement_Available from Institution_ID_Master where (id='" + sd_bank + "')";
+					bk_query_map = Map();
+					bk_query_map.put("select_query",bk_query);
+					bk_resp = invokeurl
+					[
+						url :"https://www.zohoapis.in/crm/v8/coql"
+						type :POST
+						parameters:bk_query_map.toString()
+						connection:"zohocrmall"
+					];
+					if(bk_resp != null && bk_resp != "" && bk_resp.get("data") != null && bk_resp.get("data").size() > 0)
+					{
+						ins_det = Map();
+						ins_det.put("Instituition_id",bk_resp.get("data").get(0).get("Institution_ID"));
+						ins_det.put("Netbanking_Available",bk_resp.get("data").get(0).get("Netbanking_Available"));
+						ins_det.put("AA_Available",bk_resp.get("data").get(0).get("AA_Available"));
+						ins_det.put("Statement_Available",bk_resp.get("data").get(0).get("Statement_Available"));
+						instituition_List.add(ins_det);
+					}
+					else
+					{
+						bank_not_found = true;
+					}
+				}
+			}
+		}
+		if(bank_not_found)
+		{
+			return "Unable to read the bank details. Please try again.";
+		}
+		//perfios cr
+		current_month = zoho.currentdate.getMonth();
+		current_year = zoho.currentdate.getYear();
+		duration_period = 0;
+		policy = "atLeastOneTransactionInRange";
+		app = zoho.crm.getRecordById("Contacts",app_id);
+		employment_loan = "";
+		info employment_loan = app.get("Applicant_Employment_Type");
+		if(app.get("Applicants_Type").equalsIgnoreCase("Applicant"))
+		{
+			employment_loan = app.get("Applicant_Employment_Type");
+		}
+		else if(app.get("Applicants_Type").equalsIgnoreCase("co-applicant"))
+		{
+			employment_loan = app.get("Co_Applicant_Employment_Type");
+		}
+		else if(app.get("Applicants_Type").equalsIgnoreCase("Guarantor"))
+		{
+			employment_loan = app.get("Guarantor_Employment_Type");
+		}
+		if(loan_type.equalsIgnoreCase("Personal Loan"))
+		{
+			if(employment_loan == "Salaried")
+			{
+				// 				Sivaranjani changed the acceptance policy for the PL SAL - 17/06/2025
+				policy = "atLeastOneTransactionInRange";
+				// 				policy = "atLeastOneTransactionPerMonthInRange";
+				duration_period = zoho.crm.getOrgVariable("Perfios_duration_months_Salaried");
+				info "app.get" + app.get("Applicants_Type");
+				if(app.get("Applicants_Type").equalsIgnoreCase("Applicant"))
+				{
+					info "from loan app";
+					loan = zoho.crm.getRecordById("Accounts",loan_id);
+					employer_name = loan.get("Employer_Name");
+					if(employer_name != null)
+					{
+						employer_name = employer_name.get("name");
+					}
+					else
+					{
+						employer_name = loan.get("Employer_s_Name");
+					}
+				}
+				else
+				{
+					employment = zoho.crm.getRelatedRecords("Applicant","Contacts",app_id);
+					if(employment.size() == 0)
+					{
+						return "Employer name is required for Salaried applicant. Please enter employment details to proceed further.";
+					}
+					employment = employment.get(0);
+					employer_name = employment.get("Employer_name");
+					if(employer_name != null)
+					{
+						employer_name = employer_name.get("name");
+					}
+					else
+					{
+						employer_name = employment.get("Employer_s_Name");
+					}
+				}
+			}
+			else
+			{
+				duration_period = zoho.crm.getOrgVariable("Perfios_duration_months_SENP");
+			}
+			loan_type = "PersonalLoan";
+		}
+		else if(loan_type.equalsIgnoreCase("Professional Loan"))
+		{
+			business_details = zoho.crm.getRecordById("Accounts",loan_id);
+			if(business_details.get("Month_Bank_Statement_Requirement") == "Yes")
+			{
+				duration_period = 13;
+				loan_type = "Professional Loan";
+			}
+			else
+			{
+				duration_period = zoho.crm.getOrgVariable("Perfios_duration_months_SEP");
+				loan_type = "PersonalLoan";
+			}
+		}
+		else
+		{
+			business_details = zoho.crm.getRecordById("Accounts",loan_id);
+			if(business_details.get("Banking_Requirement_Type") == "With ABB Prime")
+			{
+				duration_period = 13;
+			}
+			else
+			{
+				duration_period = zoho.crm.getOrgVariable("Perfios_duration_months_Business_loan");
+			}
+			loan_type = "BusinessLoan";
+		}
+		info current_month;
+		start_month = 0;
+		start_year = 0;
+		end_month = 0;
+		end_year = current_year;
+		start_month = current_month - duration_period.toNumber();
+		info start_month;
+		if(current_month == 1)
+		{
+			end_month = 12;
+			end_year = current_year - 1;
+		}
+		else
+		{
+			//Sivaranjani added code to add the current month - 17/06/2025
+			// Sandhya - code change 
+			end_month = current_month - 1;
+			// 			end_month = current_month;
+		}
+		if(start_month > 0)
+		{
+			start_year = current_year;
+		}
+		else
+		{
+			start_month = start_month - 1;
+			start_month = 12 + start_month + 1;
+			start_year = current_year - 1;
+			if(business_details.get("Month_Bank_Statement_Requirement") == "Yes")
+			{
+				if(start_month == 0)
+				{
+					start_year = start_year - 1;
+					start_month = 12;
+				}
+			}
+		}
+		info start_month;
+		if(start_month > 0 && start_month < 10)
+		{
+			start_month = "0" + start_month;
+		}
+		info start_year;
+		// 		// Sandhya - code change start
+		// 		if(end_month > 0 && end_month < 10)
+		// 		{
+		// 			end_month = "0" + end_month;
+		// 		}
+		if(current_month > 0 && current_month < 10)
+		{
+			current_month = "0" + current_month;
+		}
+		// Sandhya - code change end
+		duration_start = start_year + "-" + start_month;
+		info duration_start;
+		// Sandhya - code change 
+		// duration_end = end_year + "-" + end_month;
+		duration_end = current_year + "-" + current_month;
+		info duration_end;
+		required_months = List();
+		month_map = {"1":"Jan","2":"Feb","3":"Mar","4":"Apr","5":"May","6":"Jun","7":"Jul","8":"Aug","9":"Sep","10":"Oct","11":"Nov","12":"Dec","01":"Jan","02":"Feb","03":"Mar","04":"Apr","05":"May","06":"Jun","07":"Jul","08":"Aug","09":"Sep"};
+		months = {12,11,10,9,8,7,6,5,4,3,2,1};
+		required_months.add(month_map.get(end_month.toString()) + "-" + end_year.subString(2));
+		if(start_month.toDecimal() < end_month.toDecimal())
+		{
+			for each  m in months
+			{
+				if(m > start_month.toDecimal() && m < end_month.toDecimal())
+				{
+					required_months.add(month_map.get(m.toString()) + "-" + end_year.subString(2));
+				}
+			}
+		}
+		else
+		{
+			info "else";
+			for each  m in months
+			{
+				if(m >= 1 && m < end_month)
+				{
+					required_months.add(month_map.get(m.toString()) + "-" + end_year.subString(2));
+				}
+			}
+			for each  m in months
+			{
+				if(m > start_month && m <= 12)
+				{
+					if(start_year != end_year)
+					{
+						required_months.add(month_map.get(m.toString()) + "-" + start_year.subString(2));
+					}
+					else
+					{
+						required_months.add(month_map.get(m.toString()) + "-" + end_year.subString(2));
+					}
+				}
+			}
+		}
+		required_months.add(month_map.get(start_month.toString()) + "-" + start_year.subString(2));
+		curr = zoho.currenttime;
+		curr = curr.substring(12);
+		curr = curr.replaceAll(":","");
+		info curr;
+		lead_id = bank_details.get("Name");
+		transaction_id = "CHOLA" + app_no + curr;
+		header_data = Map();
+		header_data.put("X-SERVICE-NAME","ZohoCRM");
+		header_data.put("X-SERVICE-ORG","60023672997");
+		info header_data;
+		details = Map();
+		// 		details.put("transaction_id",transaction_id);
+		details.put("txnId",transaction_id);
+		if(employer_name != null && employer_name != "")
+		{
+			// Sivaranjani added for special charachter restriction  CTLZ -57049
+			if(!isNull(employer_name))
+			{
+				employer_name = employer_name.replaceAll("[^a-zA-Z0-9 ]","");
+				employer_name = employer_name.replaceAll("\\s+"," ").trim();
+			}
+			info "Employer Name After" + employer_name;
+			// Sivaranjani ended
+			//Sivaranjani commented started
+			// 			if(ifnull(employer_name,"").contains("&"))
+			// 			{
+			// 				employer_name = employer_name.replaceAll("&","<<exc>[CDATA[<per>26]]>");
+			// 			}
+			// 			/*
+			// 			JIRA ID: CTLZ-28565
+			// 			Author : Prathiba Sivakumar
+			// 			Modified Date : 19/02/2025
+			// 			Description:To handle special characters in employer name in Perfios API
+			// 			*/
+			// 			if(ifnull(employer_name,"").contains("!"))
+			// 			{
+			// 				employer_name = employer_name.replaceAll("!","<<exc>[CDATA[<per>21]]>");
+			// 			}
+			// 			if(ifnull(employer_name,"").contains("#"))
+			// 			{
+			// 				employer_name = employer_name.replaceAll("#","<<exc>[CDATA[<per>23]]>");
+			// 			}
+			// 			if(ifnull(employer_name,"").contains("$"))
+			// 			{
+			// 				employer_name = employer_name.replaceAll("\\$","<<exc>[CDATA[<per>24]]>");
+			// 			}
+			// 			if(ifnull(employer_name,"").contains("-"))
+			// 			{
+			// 				employer_name = employer_name.replaceAll("-","<<exc>[CDATA[<per>2D]]>");
+			// 			}
+			// 			if(ifnull(employer_name,"").contains("%"))
+			// 			{
+			// 				employer_name = employer_name.replaceAll("%","<<exc>[CDATA[<per>25]]>");
+			// 			}
+			// 			//Prathiba Code ended.
+			// 			Sivaranjani comment ended
+			info employer_name;
+			details.put("employerName","employer_name");
+		}
+		else
+		{
+			details.put("employerName",null);
+		}
+		//CTLZ-48279 Starts
+		if(loan_type.equalsIgnoreCase("Personal Loan") || loan_type.equalsIgnoreCase("PersonalLoan"))
+		{
+			if(employment_loan == "Salaried")
+			{
+				details.put("employmentType","Salaried");
+			}
+		}
+		//CTLZ-48279 Ends
+		details.put("destination","choice-all");
+		details.put("loanAmount","2000000");
+		details.put("loanType",loan_type);
+		//Param Change for CTLZ-48410
+		details.put("loanDuration","60");
+		details.put("acceptancePolicy",policy);
+		// 				details.put("yearMonthFrom","2025-01");
+		// 				details.put("yearMonthTo","2025-04");
+		info "******yearMonthFrom" + duration_start;
+		info "****yearMonthTo" + duration_end;
+		details.put("yearMonthFrom",duration_start);
+		details.put("yearMonthTo",duration_end);
+		details.put("productType","LOS1");
+		details.put("apiVersion",2.1);
+		details.put("vendorId","csel");
+		details.put("transactionCompleteCallbackUrl","https://" + zoho.crm.getOrgVariable("Local_Cloud_WSO2") + ".chola.murugappa.com/cselcallbackapi/1.0.0/perfios");
+		details.put("returnUrl","https://cifcl.in/ms.html");
+		details.put("facility","NONE");
+		// 		 jagatheees -CTLZ-76214  start
+		details.put("permanentAccountNumber",pan_number);
+		//details.put("dateOfBirth",date_of_birth);
+		details.put("mobileNumber",mobileNumber);
+		//added by Prathiba
+		datasource = List();
+		institution_total_list = List();
+		if(instituition_List.size() > 0)
+		{
+			for each  ins in instituition_List
+			{
+				info "For each " + ins.get("Instituition_id");
+				institution_total_list.add(ins.get("Instituition_id").toString());
+				details.put("institutionIds",{"institutionId":institution_total_list});
+				if(ifnull(constitution,"").equalsIgnoreCase(""))
+				{
+					aa_applicable = true;
+				}
+				else
+				{
+					aa_applicable = ifnull(constitution,"").equalsIgnoreCase("Sole Proprietor");
+				}
+				info aa_applicable;
+				if(!datasource.contains("ACCOUNT_AGGREGATOR") && aa_applicable && !novel_cancelled)
+				{
+					if(ifnull(ins.get("AA_Available"),"No").equalsIgnoreCase("Yes"))
+					{
+						datasource.add("ACCOUNT_AGGREGATOR");
+					}
+				}
+				if(!datasource.contains("NETBANKING_FETCH"))
+				{
+					if(ifnull(ins.get("Netbanking_Available"),"No").equalsIgnoreCase("Yes"))
+					{
+						datasource.add("NETBANKING_FETCH");
+					}
+				}
+				if(!datasource.contains("STATEMENT"))
+				{
+					if(ifnull(ins.get("Statement_Available"),"No").equalsIgnoreCase("Yes"))
+					{
+						datasource.add("STATEMENT");
+					}
+				}
+			}
+			if(datasource.size() > 0)
+			{
+				details.put("dataSourcePriority",{"dataSource":datasource});
+			}
+		}
+		info "Perfios data sources: " + datasource + " | banks: " + institution_total_list + " | Novel cancelled: " + novel_cancelled;
+		//end by Prathiba
+		info details;
+		final_list = List();
+		if(SL_DP_data.size() > 0)
+		{
+			add_to_details = false;
+			for each  sl_dp in SL_DP_data
+			{
+				sanction_limit = List();
+				drawing_power = List();
+				final_map = Map();
+				//perfios cr- scanned
+				if(sl_dp.get("S_NO") == s_no && sl_dp.get("Type") == "Perfios Online")
+				{
+					if(sl_dp.get("Type_of_Account") == "OD" || sl_dp.get("Type_of_Account") == "CC")
+					{
+						field_api_names = {"Sanction_Limit_OD_CC_Month","Drawing_Power_OD_CC_Month"};
+						business_details = zoho.crm.getRecordById("Accounts",loan_id);
+						if(business_details.get("Banking_Requirement_Type") == "With ABB Prime")
+						{
+							iterations = {1,2,3,4,5,6,7,8,9,10,11,12,13};
+						}
+						else if(loan_type.equalsIgnoreCase("Professional Loan"))
+						{
+							if(business_details.get("Month_Bank_Statement_Requirement") == "Yes")
+							{
+								iterations = {1,2,3,4,5,6,7,8,9,10,11,12,13};
+							}
+							else
+							{
+								iterations = {1,2,3,4,5,6};
+							}
+						}
+						else
+						{
+							iterations = {1,2,3,4,5,6};
+						}
+						add_to_details = true;
+						for each  field in field_api_names
+						{
+							for each  i in iterations
+							{
+								if(i <= duration_period.toNumber())
+								{
+									if(field == "Sanction_Limit_OD_CC_Month")
+									{
+										sanction_limit.add({"amount":ifnull(sl_dp.get(field + i),0)});
+									}
+									else
+									{
+										drawing_power.add({"amount":ifnull(sl_dp.get(field + i),0)});
+									}
+								}
+							}
+						}
+						final_map.put("sanctionLimitFixed",false);
+						final_map.put("accountPattern",sl_dp.get("Bank_Account_Number"));
+						final_map.put("facility",sl_dp.get("Type_of_Account"));
+						sanction_limit_reverse = List();
+						total_sl = sanction_limit.size() - 1;
+						for each index i in sanction_limit
+						{
+							sanction_limit_reverse.add(sanction_limit.get(total_sl - i));
+						}
+						drawing_power_reverse = List();
+						total_dp = drawing_power.size() - 1;
+						for each index i in drawing_power
+						{
+							drawing_power_reverse.add(drawing_power.get(total_dp - i));
+						}
+						final_map.put("sanctionLimitVariableAmounts",{"variableAmount":sanction_limit_reverse});
+						if(sl_dp.get("Type_of_Account") == "CC")
+						{
+							final_map.put("drawingPowerVariableAmounts",{"variableAmount":drawing_power_reverse});
+						}
+						final_list.add(final_map);
+					}
+				}
+			}
+			if(add_to_details)
+			{
+				details.put("accounts",{"account":final_list});
+			}
+		}
+		self_JSON = List();
+		sister_JSON = List();
+		self_string = "";
+		sister_string = "";
+		line_break = "\n";
+		self_update = List();
+		sister_update = List();
+		for each  self in bank_details.get("Self_Names_JSON")
+		{
+			self_JSON.add({"pattern":self.get("Self_Family_Name")});
+			self_string = self_string + self.get("S_No") + ". " + self.get("Self_Family_Name") + line_break;
+			self_update.add({"Self_Family_Name":self.get("Self_Family_Name"),"S_No":self.get("S_No")});
+		}
+		for each  sister in bank_details.get("Sister_Names_JSON")
+		{
+			sister_JSON.add({"pattern":sister.get("Sister_Group_Name")});
+			sister_string = sister_string + sister.get("S_No") + ". " + sister.get("Sister_Group_Name") + line_break;
+			sister_update.add({"Sister_Group_Name":sister.get("Sister_Group_Name"),"S_No":sister.get("S_No")});
+		}
+		self_before_xml = List();
+		self_count = 0;
+		mapping = Map();
+		for each  self_val in self_JSON
+		{
+			self_before_xml.add({"pattern":"Self_" + self_count});
+			mapping.put("Self_" + self_count,self_val.get("pattern"));
+			self_count = self_count + 1;
+		}
+		sister_before_xml = List();
+		sister_count = 0;
+		for each  sister_val in sister_JSON
+		{
+			sister_before_xml.add({"pattern":"Sister_" + sister_count});
+			mapping.put("Sister_" + sister_count,sister_val.get("pattern"));
+			sister_count = sister_count + 1;
+		}
+		if(self_JSON.size() > 0)
+		{
+			details.put("companyNames",{"namePattern":self_before_xml});
+		}
+		if(sister_JSON.size() > 0)
+		{
+			details.put("sisterCompanyNames",{"namePattern":sister_before_xml});
+		}
+		for each  key in mapping.keys()
+		{
+			val = mapping.get(key);
+			// 	Jayadurgaa start 		
+			// Remove null and trim spaces at beginning and end
+			val = ifnull(val,"").trim();
+			// Replace multiple spaces inside the string with a single space
+			val = val.replaceAll("\\s+"," ");
+			// 	Jayadurgaa end
+			if(ifnull(val,"").contains("!"))
+			{
+				val = val.replaceAll("!","<<exc>[CDATA[<per>21]]>");
+			}
+			if(ifnull(val,"").contains("%"))
+			{
+				val = val.replaceAll("%","<<exc>[CDATA[<per>25]]>");
+			}
+			if(ifnull(val,"").contains("&"))
+			{
+				val = val.replaceAll("&","<<exc>[CDATA[<per>26]]>");
+			}
+			if(ifnull(val,"").contains("#"))
+			{
+				val = val.replaceAll("#","<<exc>[CDATA[<per>23]]>");
+			}
+			if(ifnull(val,"").contains("$"))
+			{
+				val = val.replaceAll("\\$","<<exc>[CDATA[<per>24]]>");
+			}
+			if(ifnull(val,"").contains("-"))
+			{
+				val = val.replaceAll("-","<<exc>[CDATA[<per>2D]]>");
+			}
+			val = val.replaceAll("<exc>","!");
+			val = val.replaceAll("<per>","%");
+			if(val != mapping.get(key))
+			{
+				mapping.put(key,val);
+			}
+		}
+		info "details===" + details;
+		perfios_xml = details.toXML();
+		info "perfios_xml===========" + perfios_xml;
+		perfios_xml = perfios_xml.replaceAll("root","payload");
+		info perfios_xml;
+		if(!isNull(employer_name))
+		{
+			employer_name = employer_name.replaceAll("<exc>","!");
+			employer_name = employer_name.replaceAll("<per>","%");
+		}
+		perfios_xml_copy = perfios_xml;
+		perfios_xml_copy = perfios_xml_copy.replaceAll("employer_name",employer_name);
+		perfios_xml = perfios_xml_copy;
+		// perfios_xml = perfios_xml.replaceAll("employer_name",employer_name);
+		self_count = 0;
+		for each  self_val in self_JSON
+		{
+			perfios_xml_copy = perfios_xml;
+			if(perfios_xml_copy.contains("Self_" + self_count))
+			{
+				info "in";
+				info mapping.get("Self_" + self_count);
+				perfios_xml_copy = perfios_xml_copy.replaceAll("Self_" + self_count,mapping.get("Self_" + self_count));
+				info "perfios_xml - converted" + perfios_xml_copy;
+				perfios_xml = perfios_xml_copy;
+			}
+			self_count = self_count + 1;
+		}
+		info "perfios_xml - converted - self" + perfios_xml_copy;
+		info "mapping" + mapping;
+		sister_count = 0;
+		for each  sister_val in sister_JSON
+		{
+			perfios_xml_copy = perfios_xml;
+			if(perfios_xml_copy.contains("Sister_" + sister_count))
+			{
+				info mapping.get("Sister_" + sister_count);
+				perfios_xml_copy = perfios_xml_copy.replaceAll("Sister_" + sister_count,mapping.get("Sister_" + sister_count));
+				info "perfios_xml - converted" + perfios_xml_copy;
+				perfios_xml = perfios_xml_copy;
+			}
+			sister_count = sister_count + 1;
+		}
+		info "perfios_xml - converted" + perfios_xml_copy;
+		details1 = Map();
+		details1.put("data_xml",perfios_xml_copy);
+		details1.put("transaction_id",transaction_id);
+		info details1;
+		execute = Map();
+		execute.put("consent_obtained",true);
+		execute.put("details",details1);
+		execute.put("webhook_url","https://sandbox.zohoapis.in/crm/v7/functions/webhook_response/actions/execute?auth_type=apikey&zapikey=1003.6a1ff3c1f1fa87fe14e6b86c86b25124.25e7d885684e605085235eb3bd08a3ab");
+		//info execute;
+		lt = List();
+		lt.add("execution_path");
+		body = Map();
+		body.put("data",execute);
+		body.put("include",lt);
+		info body;
+		loggermap = Map();
+		loggermap.put("Request_Time",zoho.currenttime);
+		response = invokeurl
+		[
+			url :bfsi_bridge_domain + "/v1/features/INSIGHTS/actions/generate_link"
+			type :POST
+			parameters:body.toString()
+			headers:header_data
+			connection:"bfsibridgeusingoauth"
+			content-type:"application/json"
+		];
+		info "generate_link" + response;
+		loggermap.put("Response_Time",zoho.currenttime);
+		loggermap.put("API","Perfios Generate Link");
+		loggermap.put("Name","Perfios Generate Link");
+		loggermap.put("Deluge_Function_Name","Perfios_link : Button");
+		loggermap.put("Loan_Application_ID",loan_id);
+		loggermap.put("Loan_Application",{"id":loan_id});
+		loggermap.put("Applicant",{"id":app_id});
+		loggermap.put("Applicant_ID",app_id);
+		loggermap.put("Application_Number",app_no);
+		loggermap.put("Perfios_Status","Pending");
+		loggermap.put("API_Call_Status","Failed");
+		if(response.get("code") != "INTERNAL_SERVER_ERROR")
+		{
+			if(response.get("data").get("execution_status").equalsIgnoreCase("scheduled") || response.get("data").get("execution_status").equalsIgnoreCase("executed"))
+			{
+				xmlString = response.get("data").get("execution_path").get(0).get("response").get("response_body");
+				// xmlString = xmlString.replaceAll("<\\w+:","<").replaceAll("xmlns(:\\w+)?=\"[^\"]*\"","").replaceAll("</\\w+:","</");
+				// info xmlString;
+				url = xmlString.executeXPath("/Success/url");
+				url = url.remove("<url>");
+				url = url.remove("</url>");
+				expiry = xmlString.executeXPath("/Success/expires");
+				expiry = expiry.remove("<expires>");
+				expiry = expiry.remove("</expires>");
+				loggermap.put("Perfios_Link",url);
+				loggermap.put("Link_Status","Pending");
+				loggermap.put("Transaction_ID",transaction_id);
+				loggermap.put("API_Call_Status","Success");
+				loggermap.put("Perfios_Expiry_Date",expiry);
+				loggermap.put("Time_Taken",(response.get("data").get("execution_path").get(0).get("time_taken") / 1000).toString() + " secs");
+				info url;
+				info subform_id;
+				s_no = 1;
+				s_no = 1;
+				if(subform_id != "")
+				{
+					info subform_id;
+					for each  k in additional
+					{
+						if(k.get("id") == subform_id)
+						{
+							k.put("Status","Link Generated");
+							k.put("Transaction_ID",transaction_id);
+							k.put("Self_Names_JSON",self_update);
+							k.put("Sister_Names_JSON",sister_update);
+							k.put("Self_Names",self_string);
+							k.put("Sister_Names",sister_string);
+							s_no = k.get("LinkingModule52_Serial_Number");
+						}
+					}
+					for each  s in SL_DP_data
+					{
+						//perfios cr- scanned
+						if(s.get("S_NO") == s_no && s.get("Type") == "Perfios Online")
+						{
+							s.put("Transaction_ID",transaction_id);
+							s.put("Duration_Months",required_months.toString());
+						}
+					}
+					info zoho.crm.updateRecord("Bank_Details",id,{"Additional_banks_details":additional,"Bank_Details_Completed":false,"Show_Widget":false,"SL_DP_Data":SL_DP_data,"Hint_Message":""});
+				}
+			}
+		}
+		else
+		{
+			loggermap.put("API_Call_Status","Failed");
+			loggermap.put("Response",response);
+			info zoho.crm.createRecord("Logger",loggermap);
+			return "Internal Server Error";
+		}
+		loggermap.put("Response",response);
+		info zoho.crm.createRecord("Logger",loggermap);
+		// }
+	}
+	// url=response.get("")
+	if(expirystatus == "Expired")
+	{
+		return "The Perfios link has expired. Go to “Bank details section” and click on “Add row” button to add bank details. Then click on “Perform Perfios online” and user will be navigated to Perfios Portal";
+	}
+	else if(url != "" && url != null)
+	{
+		if(where.equalsIgnoreCase("Send a link to customer's email ID"))
+		{
+			/*sendmail
+			[
+				from :"noreply@chola.murugappa.com"
+				to :email_id
+				subject :"Upload bank statements"
+				message :"<html><body>Link for uploading statements: <a href=" + url + ">" + url + "</a></body></html>"
+			]*/
+			//Code by Alan for Send link to customer - Start
+			template_id = standalone.fetch_bridge_details("Email","Perfios_Link_Email","Template");
+			key_value = standalone.fetch_bridge_details("Email","Perfios_Link_Email","Key");
+			payload = Map();
+			payload.put("templateId",template_id);
+			payload.put("USER_NAME","CHOLA CSEL Traditional");
+			payload.put("PERFIOS_LINK",url);
+			payload.put("subject","CIFCL Loan | Perfios Banking");
+			payload.put("NAME","Perfios");
+			payload.put("fromCode","NOREPLY");
+			toMailId = List();
+			toMailId.add(email_id);
+			payload.put("toMailId",toMailId);
+			payload.put("keyId","123");
+			payload.put("userType","Email");
+			get_api_domain_wso2 = zoho.crm.getOrgVariable("Local_Onprem_WSO2");
+			header_data = Map();
+			header_data.put("Authorization",standalone.get_api_token(get_api_domain_wso2));
+			header_data.put("Content-Type","application/json");
+			header_data.put("x-email-key",key_value);
+			urlval = "https://" + get_api_domain_wso2 + ".chola.murugappa.com/bridgeemail/1.0.0/connection/api/email";
+			info payload;
+			info header_data;
+			response = invokeurl
+			[
+				url :urlval
+				type :POST
+				parameters:payload.toString()
+				headers:header_data
+				content-type:"application/json"
+			];
+			info response;
+			// Logging start
+			loggermap = Map();
+			loggermap.put("Response_Time",zoho.currenttime);
+			loggermap.put("API","Perfios Email Link");
+			loggermap.put("Name","Perfios Email Link");
+			loggermap.put("Request",payload);
+			loggermap.put("Response",response);
+			loggermap.put("Email",email_id);
+			loggermap.put("Application_Stage","Bank Details");
+			loggermap.put("Loan_Application",{"id":loan_id});
+			loggermap.put("Loan_Application_ID",loan_id);
+			loggermap.put("Application_Number",app_no);
+			//loggermap.put("API_triggered_user",{"id":userid});
+			// Parse response for IDs
+			executionStatus = false;
+			msgId = "";
+			request_id = "";
+			if(response.containsKey("status") && response.get("status") == true)
+			{
+				executionStatus = true;
+				dataMap = ifnull(response.get("data"),Map());
+				listMap = ifnull(dataMap.get("list"),Map());
+				request_id = ifnull(listMap.get("request_id"),"");
+				msgId = ifnull(listMap.get("msgId"),"");
+				loggermap.put("API_Call_Status","Success");
+				loggermap.put("Email_OTP_Request_ID",request_id);
+				loggermap.put("Email_OTP_Message_ID",msgId);
+			}
+			else
+			{
+				loggermap.put("API_Call_Status","Failed");
+			}
+			info zoho.crm.createRecord("Logger",loggermap,{"trigger":{"workflow"}});
+			//SMS Code Starts
+			template_id = standalone.fetch_bridge_details("SMS","Perfios_Link_SMS","Template");
+			key_value = standalone.fetch_bridge_details("SMS","Perfios_Link_SMS","Key");
+			payload = Map();
+			payload.put("templateId",template_id);
+			payload.put("url",url);
+			payload.put("mobileNo",mobileno);
+			payload.put("keyId","123");
+			payload.put("userType","SMS");
+			get_api_domain_wso2 = zoho.crm.getOrgVariable("Local_Onprem_WSO2");
+			header_data = Map();
+			header_data.put("Authorization",standalone.get_api_token(get_api_domain_wso2));
+			header_data.put("Content-Type","application/json");
+			header_data.put("x-sms-key",key_value);
+			urlval = "https://" + get_api_domain_wso2 + ".chola.murugappa.com/bridgesms/1.0.0/connection/sms";
+			info payload;
+			info header_data;
+			response = invokeurl
+			[
+				url :urlval
+				type :POST
+				parameters:payload.toString()
+				headers:header_data
+				content-type:"application/json"
+			];
+			info response;
+			// Logging start
+			loggermap = Map();
+			loggermap.put("Response_Time",zoho.currenttime);
+			loggermap.put("API","Perfios SMS Link");
+			loggermap.put("Name","Perfios SMS Link");
+			loggermap.put("Request",payload);
+			loggermap.put("Response",response);
+			loggermap.put("Email",email_id);
+			loggermap.put("Application_Stage","Bank Details");
+			loggermap.put("Loan_Application",{"id":loan_id});
+			loggermap.put("Loan_Application_ID",loan_id);
+			loggermap.put("Application_Number",app_no);
+			//loggermap.put("API_triggered_user",{"id":userid});
+			// Parse response for IDs
+			executionStatus = false;
+			msgId = "";
+			request_id = "";
+			if(response.containsKey("status") && response.get("status") == true)
+			{
+				executionStatus = true;
+				dataMap = ifnull(response.get("data"),Map());
+				listMap = ifnull(dataMap.get("list"),Map());
+				request_id = ifnull(listMap.get("result"),"");
+				msgId = ifnull(listMap.get("msgId"),"");
+				loggermap.put("API_Call_Status","Success");
+				loggermap.put("Email_OTP_Request_ID",request_id);
+				loggermap.put("Email_OTP_Message_ID",msgId);
+			}
+			else
+			{
+				loggermap.put("API_Call_Status","Failed");
+			}
+			info zoho.crm.createRecord("Logger",loggermap,{"trigger":{"workflow"}});
+			//SMS Code Ends
+			//Code by Alan for Send link to customer - End
+			//return "Perfios link sent to customer's email ID!";
+			return "The Perfios link has been shared with the customer via email and SMS";
+		}
+		else
+		{
+			// 		url = "https://" + url;
+			// live button: openUrl(url,"new window"); - the parent opens the link from this return value
+			return "LINK:" + url;
+		}
+	}
+	else
+	{
+		status_code = response.get("data").get("execution_path").get(0).get("response").get("status");
+		// 		status_code = "502";
+		if(status_code != "")
+		{
+			search_conf_modul = zoho.crm.searchRecords("Configuration_Module","(Name:equals:" + status_code + ")");
+			if(search_conf_modul.isEmpty() == false)
+			{
+				return "API Failed Due To " + search_conf_modul.get(0).get("Value");
+			}
+			else
+			{
+				return "API Failed";
+			}
+		}
+		else
+		{
+			return "API Failed";
+		}
+		// 	return "API Failed";
+	}
 }
-
-const getBounces = async (perfiosResult, startMonth, endMonth) => {
-  let monthlyDetailsSegment;
-  let arr = [],
-    monthlyDetailArrr = [],
-    bouncesCount = 0;
-  monthlyDetailsSegment = perfiosResult[0]['MonthlyDetail'];
-  // console.log(monthlyDetailsSegment, "monthlyDetailsSegment")
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    let resp = await getMonthDifference(monthlyDetailsSegment[i]['$']['monthName']);
-    if (
-      resp >= startMonth &&
-      resp <= endMonth &&
-      Number(monthlyDetailsSegment[i]['$']['inwEMIBounces']) >= 1
-    ) {
-      bouncesCount += 1;
-      console.log(
-        `Month difference between ${monthlyDetailsSegment[i]['$']['monthName']} and the current date: ${resp} months`
-      );
-    }
-  }
-  return bouncesCount;
-};
-
-const getAbb = async (perfiosResult, startMonth, endMonth) => {
-  let monthlyDetailsSegment;
-  let arr = [],
-    monthlyDetailArrr = [],
-    bouncesCount = 0;
-  monthlyDetailsSegment = perfiosResult[0]['MonthlyDetail'];
-  // console.log(monthlyDetailsSegment, "monthlyDetailsSegment")
-  for (let i = 0; i < monthlyDetailsSegment.length; i++) {
-    let resp = await getMonthDifference(monthlyDetailsSegment[i]['$']['monthName']);
-    if (
-      resp >= startMonth &&
-      resp <= endMonth &&
-      Number(monthlyDetailsSegment[i]['$']['inwEMIBounces']) >= 1
-    ) {
-      bouncesCount += 1;
-      console.log(
-        `Month difference between ${monthlyDetailsSegment[i]['$']['monthName']} and the current date: ${resp} months`
-      );
-    }
-  }
-  return bouncesCount;
-};
-
-const getBankName = async (accNo, statementDetails) => {
-  let iteStatment = statementDetails[0]['Statement'];
-  for (let i = 0; i < iteStatment.length; i++) {
-    // console.log(iteStatment[i], "statementDetails")
-    if (iteStatment[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['accountNo'] === accNo) {
-      // console.log(iteStatment[i]["StatementAccounts"][0]["StatementAccount"][0]["$"]["accountNo"], accNo, "shb")
-      return iteStatment[i]['CustomerInfo']?.[0]['$']?.['bank'];
-    }
-  }
-};
-
-const getAccHolderName = async (accNo, statementDetails) => {
-  let iteStatment = statementDetails[0]['Statement'];
-  for (let i = 0; i < iteStatment.length; i++) {
-    // console.log(iteStatment[i], "statementDetails")
-    if (iteStatment[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['accountNo'] === accNo) {
-      // console.log(iteStatment[i]["StatementAccounts"][0]["StatementAccount"][0]["$"]["accountNo"], accNo, "shb")
-      return iteStatment[i]['CustomerInfo']?.[0]['$']?.['name'];
-    }
-  }
-};
-
-const getTxnStartDt = async (accNo, statementDetails) => {
-  // console.log(statementDetails, "statementDetails")
-  let iteStatment = statementDetails[0]['Statement'];
-  for (let i = 0; i < iteStatment.length; i++) {
-    // console.log(iteStatment[i], "statementDetails")
-    if (iteStatment[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['accountNo'] === accNo) {
-      // console.log(iteStatment[i]["StatementAccounts"][0]["StatementAccount"][0]["$"]["accountNo"], accNo, "shb")
-      return iteStatment[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsStartDate'];
-    }
-  }
-};
-
-const getTxnEndDt = async (accNo, statementDetails) => {
-  let iteStatment = statementDetails[0]['Statement'];
-  for (let i = 0; i < iteStatment.length; i++) {
-    // console.log(iteStatment[i], "statementDetails")
-    if (iteStatment[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['accountNo'] === accNo) {
-      // console.log(iteStatment[i]["StatementAccounts"][0]["StatementAccount"][0]["$"]["accountNo"], accNo, "shb")
-      return iteStatment[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsEndDate'];
-    }
-  }
-};
-
-const avgBankBalance = async (perfiosResult, startDate, endDate, dataHeader) => {
-  let avgBankBalanceData;
-  let avgBankBalanceSum = 0;
-  let avgBankBalanceCount = 0;
-  let monthlyDetailArrr = [];
-  // console.log(perfiosResult["MonthlyDetails"], "ksfjbvh")
-
-  let data1 = perfiosResult;
-  for (let j = 0; j < data1['MonthlyDetails'][0]['MonthlyDetail'].length; j++) {
-    monthlyDetailArrr.push(data1['MonthlyDetails'][0]['MonthlyDetail'][j]);
-  }
-  avgBankBalanceData = monthlyDetailArrr;
-
-  // console.log(avgBankBalanceData,"avgBankBalanceData")
-  for (let i = 0; i < avgBankBalanceData.length; i++) {
-    const lastDt = new Date(endDate),
-      firstDt = new Date(startDate);
-    const now = new Date();
-    const then = new Date(startDate);
-
-    // let startDtFun = now.getMonth() - firstDt.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // let endDtFun = now.getMonth() - lastDt.getMonth() + 12 * (now.getFullYear() - then.getFullYear());
-    // let monthDiff = await getMonthDifference(avgBankBalanceData[i]["$"]["monthName"])
-    // console.log(startDtFun, "startDtFun", endDtFun, "endDtFun", monthDiff, "monthDiff")
-    // var msBetweenDates =
-    //     now.getMonth() -
-    //     then.getMonth() +
-    //     12 * (now.getFullYear() - then.getFullYear());
-    console.log(Number(avgBankBalanceData[i]['$']['xnsCount']), i, 'msBetweenDates');
-    if (Number(avgBankBalanceData[i]['$']['xnsCount']) > 0) {
-      // console.log(msBetweenDates, "msBetweenDates")
-      avgBankBalanceCount = avgBankBalanceCount + 1;
-      avgBankBalanceSum = avgBankBalanceSum + Number(avgBankBalanceData[i]['$']['balAvg']);
-    }
-  }
-
-  console.log(avgBankBalanceCount, avgBankBalanceSum, 'avgBankBalanceCount');
-  if (dataHeader?.emp_type === 'SAL') {
-    return Math.floor(avgBankBalanceSum / 3).toString();
-  } else if (dataHeader?.abb_months) {
-    return Math.floor(avgBankBalanceSum / dataHeader?.abb_months).toString();
-  } else {
-    return Math.floor(avgBankBalanceSum / 6).toString();
-  }
-};
-
-const getXnsStartDate = async (perfiosAccountNo, xnsData) => {
-  console.log(xnsData, 'xnsData');
-  for (let i = 0; i < xnsData.length; i++) {
-    if (xnsData[i]['$']['accountNo'] === perfiosAccountNo) {
-      // console.log(xnsData[i]["Xn"])
-      for (let j = 0; j < xnsData[i]['Xn'].length; j++) {
-        return xnsData[i]['Xn'][j]['$']['date'];
-      }
-    }
-  }
-};
-
-const getXnsEndDate = async (perfiosAccountNo, xnsData) => {
-  let endDate = '';
-  for (let i = 0; i < xnsData.length; i++) {
-    if (xnsData[i]['$']['accountNo'] === perfiosAccountNo) {
-      // console.log(xnsData[i]["Xn"])
-      for (let j = 0; j < xnsData[i]['Xn'].length; j++) {
-        endDate = xnsData[i]['Xn'][j]['$']['date'];
-      }
-    }
-  }
-  return endDate;
-};
-
-const getStatementDetails = async (accNo, stamentDetails) => {
-  let statementList = [],
-    statemenData = [];
-  try {
-    if (Array.isArray(stamentDetails[0]['Statement'])) {
-      statemenData = stamentDetails[0]['Statement'];
-    } else {
-      statemenData = [stamentDetails[0]['Statement']];
-    }
-    // console.log(statemenData, "statemen full Data")
-    for (let i = 0; i < statemenData.length; i++) {
-      // console.log(statemenData[i], "stamentDetailsstamentDetails")
-      if (
-        accNo === statemenData[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['accountNo']
-      ) {
-        var obj = {};
-        let statementStatus = statemenData?.[i]?.['$']?.['statementStatus'] || 'VERIFIED';
-
-        obj['statementname'] = statemenData[i]['$']['fileName'];
-        if (statementStatus === 'Processed') statementStatus = 'VERIFIED';
-        else if (statementStatus === 'Rejected') statementStatus = 'FAILED';
-        obj['statementStatus'] = statementStatus;
-        obj['email'] = statemenData[i]['CustomerInfo'][0]['$']['email'];
-        obj['mobile'] = statemenData[i]['CustomerInfo'][0]['$']['mobile'];
-        obj['pan'] = statemenData[i]['CustomerInfo'][0]['$']['pan'];
-        obj['address'] = statemenData[i]['CustomerInfo'][0]['$']['address'];
-        obj['reason'] = statemenData[i]['$']['reason'];
-        obj['xnsStartDate'] =
-          statemenData[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsStartDate'];
-        obj['xnsEndDate'] =
-          statemenData[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['xnsEndDate'];
-        obj['accountNo'] =
-          statemenData[i]['StatementAccounts'][0]['StatementAccount'][0]['$']['accountNo'];
-        statementList.push(obj);
-      }
-    }
-    return statementList;
-  } catch (error) {
-    console.log(error, 'Error in getStatementDetails');
-    return statementList;
-  }
-};
-
-const checkStatementType = async (data) => {
-  console.log('data', data);
-  switch (data) {
-    case 'NetBanking Account':
-      return 'NetBanking';
-    case 'Uploaded Statements':
-      return 'EPDF';
-    case 'Account Aggregator':
-      return 'AA';
-    default:
-      return '';
-  }
-};
-
-export const perfiosProcess = async (actualperfiosResult, type = 'perfiosonline', dataHeader) => {
-  try {
-    let perfiosResult = await modifiedperfiosResult(
-      actualperfiosResult,
-      dataHeader?.abb_months || 6
-    );
-    // let perfiosResult = await readFile(requestData?.xmlData)
-    // console.log(JSON.stringify(perfiosResult), type, "Perfios Result")
-    if (type === 'perfiosonline')
-      if (perfiosResult) {
-        if (!Array.isArray(perfiosResult['PIR:Data']['AccountAnalysis'])) {
-          perfiosResult['PIR:Data']['AccountAnalysis'] = [
-            perfiosResult['PIR:Data']['AccountAnalysis'],
-          ];
-        }
-        let splitBankingresponseArr = [];
-        if (perfiosResult['PIR:Data']?.['AccountAnalysis'] && Array.isArray(perfiosResult['PIR:Data']['AccountAnalysis'])) {
-          for (let j = 0; j < perfiosResult['PIR:Data']['AccountAnalysis'].length; j++) {
-            // console.log(perfiosResult["PIR:Data"]["AccountAnalysis"][j], "Perfios result")
-            let perfiosFilteredData =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'][0][
-              'MonthlyDetail'
-              ],
-              perfiosAccountNo = perfiosResult['PIR:Data']['AccountAnalysis'][j]['$']['accountNo'],
-              xnsStartDate = await getTxnStartDt(
-                perfiosAccountNo,
-                perfiosResult['PIR:Data']['Statementdetails']
-              ),
-              xnsEndDate = await getTxnEndDt(
-                perfiosAccountNo,
-                perfiosResult['PIR:Data']['Statementdetails']
-              );
-            let obj = {};
-            let monthDetails = await getMonthDetails(
-              perfiosFilteredData,
-              perfiosResult,
-              perfiosAccountNo
-            );
-            let consolidatedData = await getConsolidatedData(
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
-              perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-              j,
-              monthDetails
-            ),
-              rootTotalCredits = 0,
-              rootCredits = 0,
-              rootDebits = 0,
-              rootTotalDebits = 0;
-            consolidatedData.forEach((data) => {
-              rootTotalCredits += Number(data.creditsSum);
-            });
-            consolidatedData.forEach((data) => {
-              rootCredits += Number(data.creditsCount);
-            });
-            consolidatedData.forEach((data) => {
-              rootDebits += Number(data.debitsCount);
-            });
-            consolidatedData.forEach((data) => {
-              rootTotalDebits += Number(data.debitsSum);
-            });
-            obj['bankName'] = perfiosResult['PIR:Data']?.['Statementdetails']
-              ? await getBankName(perfiosAccountNo, perfiosResult['PIR:Data']?.['Statementdetails'])
-              : perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['$']['instName'];
-            obj['accNo'] = perfiosAccountNo;
-            obj['customerTransactionId'] = perfiosResult['PIR:Data']?.['CustomerInfo']
-              ? perfiosResult['PIR:Data']['CustomerInfo'][0]['$']?.['customerTransactionId']
-              : '';
-            obj['primaryHolder'] = perfiosResult['PIR:Data']?.['Statementdetails']
-              ? await getAccHolderName(
-                perfiosAccountNo,
-                perfiosResult['PIR:Data']['Statementdetails']
-              )
-              : perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['$']['name'];
-            obj['accType'] = perfiosResult['PIR:Data']['AccountAnalysis'][j]['$']['accountType'];
-            // obj["xnsStartDate"] = await getXnsStartDate(perfiosAccountNo, perfiosResult["PIR:Data"]["Xns"])
-            // obj["xnsEndDate"] = await getXnsEndDate(perfiosAccountNo, perfiosResult["PIR:Data"]["Xns"])
-            obj['xnsStartDate'] = monthDetails.startDate;
-            obj['xnsEndDate'] = monthDetails.endDate;
-            obj['sanctionLimit'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Average'][0]['$'][
-              'snLimit'
-              ]; //monthlydetails
-            obj['emiServiced'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Average'][0]['$'][
-              'totalEmiOrLoan'
-              ]; //monthlydetails
-            obj['statementStatus'] = await validatePerfiosResult(
-              perfiosResult,
-              j,
-              perfiosAccountNo,
-              monthDetails.startDate,
-              monthDetails.endDate
-            );
-            obj['statementType'] = await checkStatementType(
-              perfiosResult['PIR:Data']['AdditionalSummaryInfo'][0]['SummaryInfo1'][0]['$'][
-              'source'
-              ]
-            );
-            obj['averageSalaries'] = await minIncome_2(perfiosFilteredData, 'SALARIED');
-            obj['averageBankBalance'] = await avgBankBalance(
-              perfiosResult['PIR:Data']['AccountAnalysis'][j],
-              xnsStartDate,
-              xnsEndDate,
-              dataHeader
-            );
-            obj['FCUstatus'] = perfiosResult['PIR:Data']['AccountAnalysis'][j]['FCUAnalysis']
-              ? perfiosResult['PIR:Data']['AccountAnalysis'][j]['FCUAnalysis']
-              : '';
-            obj['monthYear'] = monthDetails.finalMonthRange;
-            obj['annualbankingcredits'] = await annualbankingcredits_2(
-              perfiosFilteredData,
-              dataHeader
-            );
-            obj['inwardBounceCount'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'inwBounces'
-              ];
-            obj['inwardChqBounceCount'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'inwChqBounces'
-              ];
-            obj['outwardBounceCount'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'outwBounces'
-              ];
-            obj['outwardChqBounceCount'] = perfiosResult['PIR:Data']['AccountAnalysis'][0][
-              'SummaryInfo'
-            ][0]['Total'][0]['$']['outwChqBounces']
-              ? perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-              'outwChqBounces'
-              ]
-              : '';
-            obj['totalCredits'] = rootTotalCredits.toString();
-            obj['totalDebits'] = rootTotalDebits.toString();
-            obj['countDebits'] = rootDebits.toString();
-            obj['countCredits'] = rootCredits.toString();
-            obj['totalEmi'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'totalEmiOrLoan'
-              ];
-            obj['countEmi'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'emiOrLoans'
-              ];
-            obj['inwEmiBouncesCount6M'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'inwEMIBounces'
-              ];
-            obj['drawingPower'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'dpLimit'
-              ];
-            obj['overDrawnDays'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'overdrawnDays'
-              ];
-            obj['penalCharges'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'penalCharges'
-              ];
-            obj['intrestServiceDelay'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'intPayDelay'
-              ];
-            obj['chqDepositsCount'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'chqDeposits'
-              ];
-            obj['chqIssuesCount'] =
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-              'chqIssues'
-              ];
-            obj['maxUtilization'] = await maxUtilization(
-              perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-              j
-            );
-            obj['minUtilization'] = await minUtilization(
-              perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-              j
-            );
-            obj['avgUtilization'] = await avgUtilization(
-              perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-              j,
-              monthDetails.finalMonthRange
-            );
-            obj['applicantzeroCredit'] = await applicantzeroCredit(perfiosResult);
-            obj['bounces_0m_3m'] = await getBounces(
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
-              0,
-              3
-            );
-            obj['bounces_4m_6m'] = await getBounces(
-              perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
-              4,
-              6
-            );
-            obj['consolidateData'] = consolidatedData;
-            obj['ifsc'] = perfiosResult['PIR:Data']?.['Xns']?.[j]?.['$']?.['ifscCode'] || 'NA';
-            obj['micrCode'] = perfiosResult['PIR:Data']?.['Xns']?.[j]?.['$']?.['micrCode'] || 'NA';
-            obj['statements'] = await getStatementDetails(
-              perfiosAccountNo,
-              perfiosResult['PIR:Data']['Statementdetails']
-            );
-            splitBankingresponseArr.push(obj);
-          }
-        } else {
-          console.log(typeof perfiosResult['PIR:Data']['AccountAnalysis']);
-          let perfiosFilteredData =
-            perfiosResult['PIR:Data']['AccountAnalysis']['MonthlyDetails'][0]['MonthlyDetail'];
-          let obj = {};
-          let monthDetails = await getMonthDetails(
-            perfiosFilteredData,
-            perfiosResult,
-            perfiosAccountNo
-          );
-          let consolidatedData = await getConsolidatedData(
-            perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
-            perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-            j,
-            monthDetails
-          ),
-            rootTotalCredits = 0,
-            rootCredits = 0;
-          consolidatedData.forEach((data) => {
-            rootTotalCredits += Number(data.creditsSum);
-          });
-          consolidatedData.forEach((data) => {
-            rootCredits += Number(data.creditsCount);
-          });
-          obj['customerTransactionId'] = perfiosResult['PIR:Data']?.['CustomerInfo']
-            ? perfiosResult['PIR:Data']['CustomerInfo'][0]['$']?.['customerTransactionId']
-            : '';
-          obj['primaryHolder'] = perfiosResult['PIR:Data']?.['Statementdetails']
-            ? perfiosResult['PIR:Data']['Statementdetails']?.[0]['Statement']?.['CustomerInfo']?.[
-            '$'
-            ]?.['name']
-            : perfiosResult['PIR:Data']['CustomerInfo']?.[0]['$']?.['name'];
-          obj['accType'] = perfiosResult['PIR:Data']['AccountAnalysis'][0]['$']['accountType'];
-          obj['accNo'] = perfiosResult['PIR:Data']['AccountAnalysis'][0]['$']['accountNo'];
-          obj['sanctionLimit'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][0][
-            'snLimit'
-            ];
-          obj['emiServiced'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][0][
-            'totalEmiOrLoan'
-            ];
-          obj['statementStatus'] = await validatePerfiosResult(perfiosResult, 0);
-          obj['averageSalaries'] = await minIncome_2(perfiosFilteredData, 'SALARIED');
-          obj['averageBankBalance'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'balAvg'
-            ];
-          obj['FCUstatus'] = perfiosResult['PIR:Data']['AccountAnalysis'][0]?.['FCUAnalysis']
-            ? perfiosResult['PIR:Data']['AccountAnalysis'][0]?.['FCUAnalysis']
-            : '';
-          obj['xnsStartDate'] = monthDetails.startDate;
-          obj['xnsEndDate'] = monthDetails.endDate;
-          obj['monthYear'] = monthDetails.finalMonthRange;
-          obj['annualbankingcredits'] = await annualbankingcredits_2(
-            perfiosFilteredData,
-            dataHeader
-          );
-          obj['inwardBounceCount'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'inwBounces'
-            ];
-          obj['inwardChqBounceCount'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'inwChqBounces'
-            ];
-          obj['outwardBounceCount'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'outwBounces'
-            ];
-          obj['outwardChqBounceCount'] = perfiosResult['PIR:Data']['AccountAnalysis'][0][
-            'SummaryInfo'
-          ][0]['Total'][0]['$']['outwChqBounces']
-            ? perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'outwChqBounces'
-            ]
-            : '';
-          obj['totalCredits'] = rootTotalCredits.toString();
-          obj['totalDebits'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'totalCredit'
-            ];
-          obj['countDebits'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'debits'
-            ];
-          obj['countCredits'] = rootCredits.toString();
-          obj['totalEmi'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'totalEmiOrLoan'
-            ];
-          obj['countEmi'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'][
-            'emiOrLoans'
-            ];
-          obj['inwEmiBouncesCount6M'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'inwEMIBounces'
-            ];
-          obj['drawingPower'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'dpLimit'
-            ];
-          obj['overDrawnDays'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'overdrawnDays'
-            ];
-          obj['penalCharges'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'penalCharges'
-            ];
-          obj['intrestServiceDelay'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'intPayDelay'
-            ];
-          obj['chqDepositsCount'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'chqDeposits'
-            ];
-          obj['chqIssuesCount'] =
-            perfiosResult['PIR:Data']['AccountAnalysis'][0]['SummaryInfo'][0]['Total'][0]['$'][
-            'chqIssues'
-            ];
-          obj['maxUtilization'] = await maxUtilization(
-            perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-            0
-          );
-          obj['minUtilization'] = await minUtilization(
-            perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-            0
-          );
-          obj['avgUtilization'] = await avgUtilization(
-            perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-            0,
-            monthDetails.finalMonthRange
-          );
-          obj['applicantzeroCredit'] = await applicantzeroCredit(perfiosResult);
-          obj['bounces_0m_3m'] = await getBounces(perfiosFilteredData, 0, 3);
-          obj['bounces_4m_6m'] = await getBounces(perfiosFilteredData, 4, 6);
-          obj['consolidateData'] = consolidatedData;
-          obj['ifsc'] = perfiosResult['PIR:Data']?.['Xns']?.[j]?.['$']?.['ifscCode'] || 'NA';
-          obj['micrCode'] = perfiosResult['PIR:Data']?.['Xns']?.[j]?.['$']?.['micrCode'] || 'NA';
-          obj['statements'] = await getStatementDetails(
-            perfiosAccountNo,
-            perfiosResult['PIR:Data']['Statementdetails']
-          );
-          splitBankingresponseArr.push(obj);
-        }
-        const now = new Date(),
-          fileName = now.getTime() + '.json';
-        fs.writeFileSync(`temp/${fileName}`, JSON.stringify(perfiosResult), 'utf-8');
-        let req = {
-          file: {
-            fileName,
-            path: `temp/${fileName}`,
-          },
-        };
-        let dmsResponse = await new DmsService().uploadDocument(req, fileName);
-        fs.unlink(`temp/${fileName}`, (err) => {
-          if (err) {
-            console.error(`Error deleting ${fileName}:`, err.message);
-          } else {
-            console.log(`${fileName} deleted`);
-          }
-        });
-        console.log(dmsResponse, 'DMS response');
-        return {
-          status: true,
-          data: splitBankingresponseArr,
-          dms_id: dmsResponse.data,
-        };
-      } else {
-        return { status: false, Message: 'Error in reading the xml data' };
-      }
-    else if (type === 'scannedbanking')
-      if (perfiosResult) {
-        // SB - ScannedBanking
-        console.log(perfiosResult['PIR:Data'], 'Perfios result');
-        let splitBankingresponseArr = [];
-        console.log(typeof perfiosResult['PIR:Data']);
-        let perfiosFilteredData =
-          perfiosResult?.['PIR:Data']['AccountAnalysis']?.['MonthlyDetails']?.[0][
-          'MonthlyDetail'
-          ] || perfiosResult?.['PIR:Data']?.['MonthlyDetails']?.[0]?.['MonthlyDetail'];
-        let obj = {};
-        let monthDetails = await getMonthDetails(
-          perfiosFilteredData,
-          perfiosResult,
-          perfiosAccountNo
-        );
-        let consolidatedData = await getConsolidatedData(
-          perfiosResult['PIR:Data']['AccountAnalysis'][j]['MonthlyDetails'],
-          perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-          j,
-          monthDetails
-        ),
-          rootTotalCredits = 0,
-          rootCredits = 0;
-        consolidatedData.forEach((data) => {
-          rootTotalCredits += Number(data.creditsSum);
-        });
-        consolidatedData.forEach((data) => {
-          rootCredits += Number(data.creditsCount);
-        });
-        // console.log(perfiosResult["PIR:Data"]?.["SummaryInfo"]?.[0], "skdjbf")
-        obj['primaryHolder'] = perfiosResult['PIR:Data']?.hasOwnProperty('Statementdetails')
-          ? perfiosResult['PIR:Data']['Statementdetails']?.[0]['Statement'][0]?.[
-          'CustomerInfo'
-          ][0]?.['$']?.['name']
-          : perfiosResult['PIR:Data']?.['StatementAccounts']?.[0]['$']?.['name'];
-        obj['accType'] = perfiosResult['PIR:Data']?.['SummaryInfo']?.[0]['$']?.['accType'];
-        obj['accNo'] = perfiosResult['PIR:Data']?.['SummaryInfo']?.[0]['$']?.['accNo'];
-        obj['xnsStartDate'] = monthDetails.startDate;
-        obj['xnsEndDate'] = monthDetails.endDate;
-        // obj["sanctionLimit"] =
-        //     perfiosResult["PIR:Data"]["SummaryInfo"][0]["Total"][0]["$"][0]["snLimit"];
-        obj['emiServiced'] =
-          perfiosResult['PIR:Data']?.['SummaryInfo']?.[0]['Total']?.[0]['$']?.['totalEmiOrLoan'];
-        obj['statementStatus'] = await validatePerfiosResult(perfiosResult);
-        obj['averageSalaries'] = await minIncome_2(perfiosFilteredData, 'SALARIED');
-        obj['averageBankBalance'] =
-          perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['balAvg'];
-        obj['FCUstatus'] = perfiosResult['PIR:Data']?.['FCUAnalysis']
-          ? perfiosResult['PIR:Data']?.['FCUAnalysis']
-          : '';
-        obj['monthYear'] = monthDetails.finalMonthRange;
-        obj['annualbankingcredits'] = await annualbankingcredits_2(perfiosFilteredData, dataHeader);
-        obj['inwardBounceCount'] =
-          perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['inwBounces'];
-        obj['inwardChqBounceCount'] = perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$'][
-          'inwChqBounces'
-        ]
-          ? perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['inwChqBounces']
-          : '';
-        obj['outwardBounceCount'] =
-          perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['outwBounces'];
-        obj['outwardChqBounceCount'] = perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$'][
-          'outwChqBounces'
-        ]
-          ? perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['outwChqBounces']
-          : '';
-        obj['totalCredits'] = rootTotalCredits.toString();
-        obj['totalDebits'] =
-          perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['totalDebit'];
-        obj['countDebits'] = perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['debits'];
-        obj['countCredits'] = rootCredits.toString();
-        obj['totalEmi'] =
-          perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['totalEmiOrLoan'];
-        obj['countEmi'] =
-          perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['emiOrLoans'];
-        obj['inwEmiBouncesCount6M'] = perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$'][
-          'inwEMIBounces'
-        ]
-          ? perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['inwEMIBounces']
-          : '';
-        obj['drawingPower'] = perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$'][
-          'dpLimit'
-        ]
-          ? perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['dpLimit']
-          : '';
-        obj['overDrawnDays'] = perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$'][
-          'overdrawnDays'
-        ]
-          ? perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['overdrawnDays']
-          : '';
-        obj['penalCharges'] = perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$'][
-          'penalCharges'
-        ]
-          ? perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['penalCharges']
-          : '';
-        obj['intrestServiceDelay'] = perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$'][
-          'intPayDelay'
-        ]
-          ? perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['intPayDelay']
-          : '';
-        obj['chqDepositsCount'] =
-          perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['chqDeposits'];
-        obj['chqIssuesCount'] =
-          perfiosResult['PIR:Data']['SummaryInfo'][0]['Total'][0]['$']['chqIssues'];
-        obj['maxUtilization'] = await maxUtilization(
-          perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-          0
-        );
-        obj['minUtilization'] = await minUtilization(
-          perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-          0
-        );
-        obj['avgUtilization'] = await avgUtilization(
-          perfiosResult['PIR:Data']['AdditionalMonthlyDetails'],
-          0,
-          monthDetails.finalMonthRange
-        );
-        obj['applicantzeroCredit'] = await applicantzeroCredit1(perfiosResult);
-        obj['consolidateData'] = consolidatedData;
-        obj['ifsc'] = perfiosResult['PIR:Data']?.['Xns']?.[j]?.['$']?.['ifscCode'] || 'NA';
-        obj['micrCode'] = perfiosResult['PIR:Data']?.['Xns']?.[j]?.['$']?.['micrCode'] || 'NA';
-        splitBankingresponseArr.push(obj);
-        const now = new Date(),
-          fileName = now.getTime() + '.json';
-        fs.writeFileSync(`temp/${fileName}`, JSON.stringify(perfiosResult), 'utf-8');
-        let req = {
-          file: {
-            fileName,
-            path: `temp/${fileName}`,
-          },
-        };
-        let dmsResponse = await new DmsService().uploadDocument(req, fileName);
-        fs.unlink(`temp/${fileName}`, (err) => {
-          if (err) {
-            console.error(`Error deleting ${fileName}:`, err.message);
-          } else {
-            console.log(`${fileName} deleted`);
-          }
-        });
-        console.log(dmsResponse, 'DMS response');
-        return {
-          status: true,
-          data: splitBankingresponseArr,
-          dms_id: dmsResponse.data,
-        };
-      } else {
-        return { status: false, Message: 'Error in reading the xml data' };
-      }
-    else return { status: false, Message: 'Invalid header type' };
-  } catch (error) {
-    console.log(error, 'Error in perfios computation');
-    return { status: false, Message: 'Error in perfios computation' };
-  }
-};
-
-const modifiedperfiosResult = async (perfiosData, avg = 6) => {
-  try {
-    let perfiosResult = perfiosData;
-    let splitBankingresponseArr = [];
-    const monthdata = await monthsplit(avg);
-    const avgcount = avg;
-    // let consdatedData = [];
-
-    if (!Array.isArray(perfiosResult['PIR:Data']['AccountAnalysis'])) {
-      perfiosResult['PIR:Data']['AccountAnalysis'] = [perfiosResult['PIR:Data']['AccountAnalysis']];
-    }
-
-    if (
-      perfiosResult['PIR:Data']?.['AccountAnalysis'] &&
-      Array.isArray(perfiosResult['PIR:Data']['AccountAnalysis'])
-    ) {
-      for (let j = 0; j < perfiosResult['PIR:Data']['AccountAnalysis'].length; j++) {
-        let consdatedData = [];
-        let account =
-          perfiosResult['PIR:Data']['AccountAnalysis'][j]?.MonthlyDetails[0].MonthlyDetail;
-        //let account=monthlyDet["MonthlyDetail"]
-        account.forEach((element) => {
-          if (monthdata.includes(element?.['$']?.['monthName'])) {
-            console.log(element?.['$']?.['monthName'], 'DAta');
-            consdatedData.push(element['$']);
-          }
-          console.log(consdatedData, 'last 6 month');
-        });
-
-        if (consdatedData.length > 0) {
-          let copmutation = await calculateAverage(consdatedData, avgcount);
-          console.log(copmutation.total, copmutation.averages, 'modresult');
-          perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Average'][0]['$'] =
-            copmutation.averages;
-          perfiosResult['PIR:Data']['AccountAnalysis'][j]['SummaryInfo'][0]['Total'][0]['$'] =
-            copmutation.total;
-        }
-        //account.total=result
-        console.log(account, 'modifiedData');
-      }
-    }
-    return perfiosResult;
-  } catch (error) {
-    console.log(error);
-    throw new Error('Error in modifying Perfios Data');
-  }
-};
-
-const monthsplit = async (data) => {
-  const monthList = [];
-  for (let i = 1; i <= data; i++) {
-    const date = moment().subtract(i, 'months');
-    const formatted = date.format('MMM-YY'); // "Dec-21"
-    monthList.push(formatted);
-  }
-  return monthList;
-};
-
-const calculateAverage = async (perData, count) => {
-  try {
-    const normalized = perData.map((entry) => entry.$ || entry);
-    // Get numeric keys
-    const keys = Object.keys(normalized[0]).filter((key) => !isNaN(parseFloat(normalized[0][key])));
-    // Initialize totals
-    const totals = {};
-    keys.forEach((key) => (totals[key] = 0));
-    // Sum all values
-    normalized.forEach((item) => {
-      keys.forEach((key) => {
-        totals[key] += parseFloat(item[key]);
-      });
-    });
-
-    // Calculate averages
-    // const count = normalized.length;
-    const averages = {};
-    const total = {};
-    keys.forEach((key) => {
-      total[key] = totals[key].toFixed(2);
-      averages[key] = (totals[key] / count).toFixed(2);
-    });
-
-    return { total, averages };
-  } catch (error) {
-    console.log(error?.message || error);
-    throw new Error('Error in Calculating  statement Average');
-  }
-};
-
-export const readFile = async (perfiosResult) => {
-  // console.log(data, "datahsdb");
-  if (perfiosResult) {
-    return new Promise((resolve, reject) => {
-      const options = {
-        explicitArray: false,
-      };
-      parseString(perfiosResult, options, function (err, result) {
-        if (err) {
-          console.log(err);
-          reject(false);
-        } else {
-          if (result) {
-            resolve(result);
-            console.log(JSON.stringify(result), 'result');
-            fs.writeFile('test.json', JSON.stringify(result), (err) => {
-              if (err) console.log(err);
-              else console.log('completed');
-            });
-          }
-        }
-      });
-    });
-  } else {
-    return false;
-  }
-};
-
-console.log(await perfiosProcess(await readFile(xmlResponse)))
-console.log(await readFile(xmlResponse))
+catch (e)
+{
+	emp = Map();
+	emp.put("details",dmp);
+	emp.put("error_message",e.toString());
+	emp.put("action_performed","Perfios_link > Overall catch.");
+	info emp;
+	info standalone.Client_Script_Assistance_Error_message(emp,"Error_Message");
+}
+return "";
+}
