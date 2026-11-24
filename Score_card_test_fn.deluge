@@ -1,4 +1,4 @@
-string button.Perfios_link(String id)
+string standalone.CSEL_GENERATE_PERFIOS_LINK(String id)
 {
 /*Modification History
 CTLZ-48279  Include "employmentType" in Perfios BSA API Request Payload			Alan			25-Feb-2026
@@ -17,23 +17,8 @@ try
 	bank_details = zoho.crm.getRecordById("Bank_Details",id);
 	loan_type = bank_details.get("Loan_Type");
 	email_id = ifnull(bank_details.get("Email_ID"),"");
-	//perfios cr
-	if(bank_details.get("Save_Widget"))
-	{
-		return "Please save the Self/Sister Name details to proceed further.";
-	}
-	if(isNull(bank_details.get("Self_Names_JSON")))
-	{
-		return "Please save the Self/Sister Name details to proceed further.";
-	}
-	// 	jagathees CTLZ-58562 -start
-	is_rbi_validation = standalone.CSEL_BANKING_RBI_VALIDATION(id);
-	info is_rbi_validation;
-	if(is_rbi_validation == "true")
-	{
-		return "The selected bank supports Account Aggregator/Net Banking. Please choose 'Send Link to Customer' to enable the customer to complete Perfios online.";
-	}
-	// 	jagathees CTLZ-58562 -end 
+	// Novel
+	novel_cancelled = ifnull(bank_details.get("Novel_Cancelled"),false);
 	try 
 	{
 		SL_DP_datas = bank_details.get("SL_DP_Data");
@@ -48,25 +33,6 @@ try
 					{
 						return "Kindly select 'Name of the Bank' in Account Details";
 					}
-					info "Prathi Check";
-					ins_det = Map();
-					query = "select Institution_ID,Netbanking_Available,AA_Available,Statement_Available from Institution_ID_Master where (id='" + sl_dps.get("Name_of_the_Bank").get("id") + "')";
-					queryMap = Map();
-					queryMap.put("select_query",query);
-					resp = invokeurl
-					[
-						url :"https://www.zohoapis.in/crm/v8/coql"
-						type :POST
-						parameters:queryMap.toString()
-						connection:"zohocrmall"
-					];
-					info resp.get("data").get(0);
-					ins_det.put("Instituition_id",resp.get("data").get(0).get("Institution_ID"));
-					ins_det.put("Netbanking_Available",resp.get("data").get(0).get("Netbanking_Available"));
-					ins_det.put("AA_Available",resp.get("data").get(0).get("AA_Available"));
-					ins_det.put("Statement_Available",resp.get("data").get(0).get("Statement_Available"));
-					info ins_det;
-					instituition_List.add(ins_det);
 				}
 				//end by Prathiba
 				info instituition_List;
@@ -216,6 +182,7 @@ try
 				if(ifnull(i.get("Status"),"").equalsIgnoreCase("Pending") || ifnull(i.get("Status"),"").equalsIgnoreCase("Link Generated") || i.get("Status") == null)
 				{
 					where = i.get("Where_would_you_want_to_upload_bank_statements");
+					s_no = ifnull(i.get("LinkingModule52_Serial_Number"),1);
 					subform_id = i.get("id");
 					acc_type = i.get("Account_Type");
 					//search and if yes use same link else new
@@ -589,6 +556,49 @@ try
 		// 	second_bank = bank_details.get("second_bank");
 		//perfios cr
 		SL_DP_data = bank_details.get("SL_DP_Data");
+		// ---- Bank details for the data sources: one query per bank row, like the live function
+		bank_not_found = false;
+		for each  sd in SL_DP_data
+		{
+			if(isNull(sd.get("Transaction_ID")) || sd.get("S_NO") == s_no && sd.get("Type") == "Perfios Online")
+			{
+				sd_bank = ifnull(sd.get("Name_of_the_Bank"),Map()).get("id");
+				if(isNull(sd_bank))
+				{
+					bank_not_found = true;
+				}
+				else
+				{
+					bk_query = "select Institution_ID,Netbanking_Available,AA_Available,Statement_Available from Institution_ID_Master where (id='" + sd_bank + "')";
+					bk_query_map = Map();
+					bk_query_map.put("select_query",bk_query);
+					bk_resp = invokeurl
+					[
+						url :"https://www.zohoapis.in/crm/v8/coql"
+						type :POST
+						parameters:bk_query_map.toString()
+						connection:"zohocrmall"
+					];
+					if(bk_resp != null && bk_resp != "" && bk_resp.get("data") != null && bk_resp.get("data").size() > 0)
+					{
+						ins_det = Map();
+						ins_det.put("Instituition_id",bk_resp.get("data").get(0).get("Institution_ID"));
+						ins_det.put("Netbanking_Available",bk_resp.get("data").get(0).get("Netbanking_Available"));
+						ins_det.put("AA_Available",bk_resp.get("data").get(0).get("AA_Available"));
+						ins_det.put("Statement_Available",bk_resp.get("data").get(0).get("Statement_Available"));
+						instituition_List.add(ins_det);
+					}
+					else
+					{
+						bank_not_found = true;
+					}
+				}
+			}
+		}
+		if(bank_not_found)
+		{
+			return "Unable to read the bank details. Please try again.";
+		}
 		//perfios cr
 		current_month = zoho.currentdate.getMonth();
 		current_year = zoho.currentdate.getYear();
@@ -896,7 +906,7 @@ try
 					aa_applicable = ifnull(constitution,"").equalsIgnoreCase("Sole Proprietor");
 				}
 				info aa_applicable;
-				if(!datasource.contains("ACCOUNT_AGGREGATOR") && aa_applicable)
+				if(!datasource.contains("ACCOUNT_AGGREGATOR") && aa_applicable && !novel_cancelled)
 				{
 					if(ifnull(ins.get("AA_Available"),"No").equalsIgnoreCase("Yes"))
 					{
@@ -923,6 +933,7 @@ try
 				details.put("dataSourcePriority",{"dataSource":datasource});
 			}
 		}
+		info "Perfios data sources: " + datasource + " | banks: " + institution_total_list + " | Novel cancelled: " + novel_cancelled;
 		//end by Prathiba
 		info details;
 		final_list = List();
@@ -1260,7 +1271,8 @@ try
 			payload.put("templateId",template_id);
 			payload.put("USER_NAME","CHOLA CSEL Traditional");
 			payload.put("PERFIOS_LINK",url);
-			payload.put("subject","CIFCL Loan | Perfios Banking");
+			payload.put("subject","CIFCL Loan | Banking");
+			payload.put("NAME","Perfios");
 			payload.put("fromCode","NOREPLY");
 			toMailId = List();
 			toMailId.add(email_id);
@@ -1383,8 +1395,9 @@ try
 		}
 		else
 		{
-			// 		url = "https://" + url;
-			openUrl(url,"new window");
+			info "url" + url;
+			//  the parent opens the link from this return value
+			return "LINK:" + url;
 		}
 	}
 	else
