@@ -71,7 +71,8 @@ try
 	info "EMAIL API HEADERS : " + header_data;
 	info "EMAIL API BODY : " + body;
 	loggermap = Map();
-	loggermap.put("Request_Time",zoho.currenttime);
+	request_time = zoho.currenttime;
+	loggermap.put("Request_Time",request_time);
 	response = invokeurl
 	[
 		url :"https://" + get_api_domain_wso2 + ".chola.murugappa.com/bridgeemail/1.0.0/connection/api/email/send/otp"
@@ -84,7 +85,8 @@ try
 	info "EMAIL API RESPONSE : " + response;
 
 
-	loggermap.put("Response_Time",zoho.currenttime);
+	response_time = zoho.currenttime;
+	loggermap.put("Response_Time",response_time);
 	loggermap.put("API","Email Verification Request Link");
 	loggermap.put("Name","Email Verification Request Link API");
 	loggermap.put("Loan_Application",{"id":loanid});
@@ -95,15 +97,19 @@ try
 	loggermap.put("Deluge_Function_Name","send_email_verification_link : standalone");
 	loggermap.put("Response",response);
 	loggermap.put("Email",email);
-	if(response.get("data").get("execution_status") == "executed")
+	// Email API response (direct call, not the Bridge wrapper):
+	// {"traceId":"...","responseDate":"...","status":true,"message":"Success",
+	//  "data":{"msg":"Email initiated successfully","message":"SucessFull","list":{"request_id":"...","msgId":"..."}}}
+	res = response.toString().toMap();
+	res_data = ifnull(res.get("data"),Map());
+	res_list = ifnull(res_data.get("list"),Map());
+	msg_id = res_list.get("msgId");
+	loggermap.put("Time_Taken",((response_time.toLong() - request_time.toLong()) / 1000).toString() + " secs");
+	if(res.get("status") == true && !isNull(msg_id) && msg_id.toString() != "")
 	{
 		loggermap.put("API_Call_Status","Success");
-		loggermap.put("Time_Taken",(response.get("data").get("execution_path").get(0).get("time_taken") / 1000).toString() + " secs");
-		// ===== FROM BRIDGE TEAM (4): response path - same as OTP for now, change if different =====
-		resquest_val = response.get("data").get("execution_path").get(0).get("response").get("response_body").toMap();
-		msg_id = resquest_val.get("data").get("list").get("msgId");
 		// msgId is the key the callback uses to find this applicant (same as OTP verify)
-		loggermap.put("Email_OTP_Request_ID",resquest_val.get("data").get("list").get("request_id"));
+		loggermap.put("Email_OTP_Request_ID",res_list.get("request_id"));
 		loggermap.put("Email_OTP_Message_ID",msg_id);
 		loggermap.put("Email_verification_status","Link Sent");
 		// Mark the row as "Sent". Send ALL rows with id, otherwise CRM deletes the missing rows.
@@ -126,7 +132,7 @@ try
 	else
 	{
 		loggermap.put("API_Call_Status","Failed");
-		response_map.put("message","Email Link API Failed");
+		response_map.put("message","Email Link API Failed: " + ifnull(res.get("message"),"No response"));
 	}
 	info "createRecord:" + zoho.crm.createRecord("Logger",loggermap);
 }
@@ -145,6 +151,3 @@ catch (e)
 }
 return response_map;
 }
-
-
-// repso EMAIL API RESPONSE : {"traceId":"b0c73d31-7e0d-46cd-a229-2cd5895375e7","responseDate":"2026-11-25T06:49:23.766Z","status":true,"message":"Success","data":{"msg":"Email initiated successfully","message":"SucessFull","list":{"request_id":"A.1795589394064123340.21855.1338","msgId":"O-M-1795589363560-HLQgzS"}}}
